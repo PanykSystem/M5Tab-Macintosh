@@ -1,7 +1,7 @@
 /**
  * @file ui_init.h
  * Display Initialization for Tab5 720p Display
- * Uses M5GFX for direct rendering (no LVGL)
+ * Hello World Demo - M5Stack Tab5
  */
 
 #ifndef UI_INIT_H

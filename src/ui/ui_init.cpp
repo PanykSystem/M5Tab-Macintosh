@@ -1,7 +1,7 @@
 /**
  * @file ui_init.cpp
  * Display Initialization Implementation
- * Uses M5Canvas for double-buffered rendering
+ * Hello World Demo - M5Stack Tab5
  */
 
 #include "ui_init.h"

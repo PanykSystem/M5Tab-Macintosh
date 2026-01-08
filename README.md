@@ -1,14 +1,12 @@
-# BigDashVesc
+# Hello World - M5Stack Tab5
 
-A VESC dashboard application for the M5Stack Tab5, featuring a 720p touchscreen display with real-time telemetry visualization and a web-based remote dashboard.
+A minimal Hello World application for the M5Stack Tab5, demonstrating WiFi connectivity and a web-based device stats dashboard.
 
 ## Features
 
-- **720p Dashboard Display** - Full-color UI optimized for the Tab5's 1280x720 IPS display
-- **BLE VESC Connection** - Connects to VESC controllers via Bluetooth Low Energy
-- **WiFi Web Dashboard** - Remote monitoring through a web interface with WebSocket real-time updates
-- **Auto-Reconnect** - Automatically reconnects to previously paired VESC devices
-- **Persistent Storage** - Saves settings and last connected device to NVS flash
+- **Hello World Display** - Attractive centered text on the 1280x720 display
+- **WiFi Connection** - Connects to configured WiFi with visual progress feedback
+- **Device Stats Web Server** - View CPU, RAM, and Flash usage via web browser
 
 ## Hardware
 
@@ -43,54 +41,39 @@ pio run --target upload
 pio device monitor
 ```
 
-### Filesystem Upload
-
-The web dashboard files are stored on LittleFS. Upload them with:
-
-```bash
-pio run --target uploadfs
-```
-
 ## Project Structure
 
 ```
 ├── src/
-│   ├── main.cpp           # Application entry point and state machine
-│   ├── config.h           # Configuration constants
-│   ├── ble_vesc.*         # BLE VESC communication
-│   ├── vesc_protocol.*    # VESC packet encoding/decoding
-│   ├── wifi_manager.*     # WiFi connection management
-│   ├── web_server.*       # HTTP server and WebSocket handling
-│   ├── storage.*          # NVS persistent storage
+│   ├── main.cpp           # Application entry point
+│   ├── config.h           # WiFi credentials and configuration
+│   ├── web_server.*       # HTTP server serving device stats
 │   └── ui/
-│       ├── ui_init.*      # Display initialization
-│       └── ui_dashboard.* # Dashboard rendering
-├── data/                  # Web dashboard files (LittleFS)
-│   ├── index.html
-│   ├── css/style.css
-│   └── js/app.js
+│       └── ui_init.*      # Display initialization
 ├── scripts/               # Build scripts
-├── platformio.ini         # PlatformIO configuration
-└── partitions.csv         # Custom partition table
+└── platformio.ini         # PlatformIO configuration
 ```
 
 ## Web Dashboard
 
-Once connected to WiFi, access the web dashboard at the device's IP address. The dashboard displays:
+Once connected to WiFi, access the device stats at the displayed IP address. The dashboard shows:
 
-- Real-time speed and power metrics
-- Battery voltage and current
-- Motor temperature
-- Trip statistics
+- Chip model and CPU frequency
+- Heap memory usage
+- PSRAM usage
+- Flash storage usage
+- WiFi signal strength
+- Device uptime
+
+The page auto-refreshes every 5 seconds.
 
 ## Configuration
 
 Edit `src/config.h` to customize:
 
-- WiFi credentials
-- Display refresh rates
-- BLE scan parameters
-- VESC communication intervals
+- `WIFI_SSID` - WiFi network name
+- `WIFI_PASSWORD` - WiFi password
+- `WIFI_CONNECT_TIMEOUT_MS` - Connection timeout
 
 ## License
 

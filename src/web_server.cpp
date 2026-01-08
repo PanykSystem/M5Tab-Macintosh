@@ -1,10 +1,10 @@
 /**
  * @file web_server.cpp
- * Web Server Implementation - LittleFS based
+ * Simple Web Server Implementation - Device Stats Page
  */
 
 #include "web_server.h"
-#include "ble_vesc.h"
+#include <WiFi.h>
 
 // Global instance
 WebServerManager webServer;
@@ -15,11 +15,7 @@ WebServerManager webServer;
 
 WebServerManager::WebServerManager()
     : server(nullptr)
-    , ws(nullptr)
-    , vescMgr(nullptr)
-    , lastBroadcast(0)
     , isRunning(false)
-    , fsInitialized(false)
 {
 }
 
@@ -28,63 +24,17 @@ WebServerManager::~WebServerManager() {
 }
 
 // ============================================================================
-// File System Initialization
-// ============================================================================
-
-bool WebServerManager::initFileSystem() {
-    if (fsInitialized) {
-        return true;
-    }
-    
-    Serial.println("[Web] Initializing LittleFS...");
-    
-    if (!LittleFS.begin(true)) {
-        Serial.println("[Web] LittleFS mount failed!");
-        return false;
-    }
-    
-    // List files for debugging
-    Serial.println("[Web] LittleFS contents:");
-    File root = LittleFS.open("/");
-    File file = root.openNextFile();
-    while (file) {
-        Serial.printf("  %s (%d bytes)\n", file.name(), file.size());
-        file = root.openNextFile();
-    }
-    
-    fsInitialized = true;
-    Serial.println("[Web] LittleFS initialized");
-    return true;
-}
-
-// ============================================================================
 // Initialization
 // ============================================================================
 
-void WebServerManager::begin(BLEVescManager* vescManager) {
+void WebServerManager::begin() {
     if (isRunning) {
         return;
     }
     
-    vescMgr = vescManager;
-    
     Serial.println("[Web] Starting web server...");
     
-    // Initialize file system
-    if (!initFileSystem()) {
-        Serial.println("[Web] WARNING: LittleFS not available, static files won't be served");
-    }
-    
     server = new AsyncWebServer(WEB_SERVER_PORT);
-    ws = new AsyncWebSocket(WEBSOCKET_PATH);
-    
-    // Setup WebSocket handler
-    ws->onEvent([this](AsyncWebSocket* server, AsyncWebSocketClient* client,
-                       AwsEventType type, void* arg, uint8_t* data, size_t len) {
-        this->onWsEvent(server, client, type, arg, data, len);
-    });
-    
-    server->addHandler(ws);
     
     // Setup routes
     setupRoutes();
@@ -100,12 +50,6 @@ void WebServerManager::stop() {
         return;
     }
     
-    if (ws) {
-        ws->closeAll();
-        delete ws;
-        ws = nullptr;
-    }
-    
     if (server) {
         server->end();
         delete server;
@@ -117,80 +61,14 @@ void WebServerManager::stop() {
 }
 
 // ============================================================================
-// MIME Type Helper
-// ============================================================================
-
-String WebServerManager::getContentType(const String& filename) {
-    if (filename.endsWith(".html")) return "text/html";
-    if (filename.endsWith(".css")) return "text/css";
-    if (filename.endsWith(".js")) return "application/javascript";
-    if (filename.endsWith(".json")) return "application/json";
-    if (filename.endsWith(".png")) return "image/png";
-    if (filename.endsWith(".jpg")) return "image/jpeg";
-    if (filename.endsWith(".ico")) return "image/x-icon";
-    if (filename.endsWith(".svg")) return "image/svg+xml";
-    if (filename.endsWith(".woff")) return "font/woff";
-    if (filename.endsWith(".woff2")) return "font/woff2";
-    return "text/plain";
-}
-
-// ============================================================================
 // Route Setup
 // ============================================================================
 
 void WebServerManager::setupRoutes() {
-    // Setup API routes first (more specific)
-    setupApiRoutes();
-    
-    // Setup static file serving from LittleFS
-    setupStaticFiles();
-    
-    // 404 handler
-    server->onNotFound([](AsyncWebServerRequest* request) {
-        request->send(404, "text/plain", "Not Found");
-    });
-}
-
-void WebServerManager::setupStaticFiles() {
-    // Serve index.html for root
+    // Main stats page
     server->on("/", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        if (fsInitialized && LittleFS.exists("/index.html")) {
-            request->send(LittleFS, "/index.html", "text/html");
-        } else {
-            // Fallback: simple inline page
-            String html = "<!DOCTYPE html><html><head>";
-            html += "<meta name='viewport' content='width=device-width, initial-scale=1'>";
-            html += "<title>BigDashVesc</title>";
-            html += "<style>body{font-family:sans-serif;background:#0d1117;color:#fff;display:flex;";
-            html += "justify-content:center;align-items:center;height:100vh;margin:0;}";
-            html += ".box{text-align:center;padding:40px;background:#161b22;border-radius:12px;}";
-            html += "h1{color:#58a6ff;margin-bottom:20px;}</style></head><body>";
-            html += "<div class='box'><h1>BigDashVesc</h1>";
-            html += "<p>Web UI files not found in LittleFS.</p>";
-            html += "<p>Upload files with: <code>pio run --target uploadfs</code></p>";
-            html += "</div></body></html>";
-            request->send(200, "text/html", html);
-        }
-    });
-    
-    // Serve all other files from LittleFS
-    server->serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-}
-
-void WebServerManager::setupApiRoutes() {
-    // Telemetry API (polling fallback)
-    server->on("/api/telemetry", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        handleGetTelemetry(request);
-    });
-    
-    // Status API
-    server->on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) {
-        handleGetStatus(request);
-    });
-    
-    // VESC reboot
-    server->on("/api/vesc/reboot", HTTP_POST, [this](AsyncWebServerRequest* request) {
-        handleVescReboot(request);
+        String html = generateStatsPage();
+        request->send(200, "text/html", html);
     });
     
     // Health check
@@ -198,223 +76,269 @@ void WebServerManager::setupApiRoutes() {
         request->send(200, "text/plain", "OK");
     });
     
-    // System info
-    server->on("/api/system", HTTP_GET, [](AsyncWebServerRequest* request) {
-        JsonDocument doc;
-        doc["freeHeap"] = ESP.getFreeHeap();
-        doc["freePsram"] = ESP.getFreePsram();
-        doc["uptime"] = millis() / 1000;
-        doc["chipModel"] = ESP.getChipModel();
-        doc["cpuFreq"] = ESP.getCpuFreqMHz();
-        
-        String output;
-        serializeJson(doc, output);
-        request->send(200, "application/json", output);
+    // 404 handler
+    server->onNotFound([](AsyncWebServerRequest* request) {
+        request->send(404, "text/plain", "Not Found");
     });
 }
 
 // ============================================================================
-// API Handlers
+// Stats Page Generation
 // ============================================================================
 
-void WebServerManager::handleGetTelemetry(AsyncWebServerRequest* request) {
-    if (!vescMgr) {
-        request->send(500, "application/json", "{\"error\":\"No VESC manager\"}");
-        return;
+String WebServerManager::generateStatsPage() {
+    // Gather device stats
+    uint32_t freeHeap = ESP.getFreeHeap();
+    uint32_t totalHeap = ESP.getHeapSize();
+    uint32_t freePsram = ESP.getFreePsram();
+    uint32_t totalPsram = ESP.getPsramSize();
+    uint32_t flashSize = ESP.getFlashChipSize();
+    uint32_t sketchSize = ESP.getSketchSize();
+    uint32_t freeSketchSpace = ESP.getFreeSketchSpace();
+    uint32_t cpuFreq = ESP.getCpuFreqMHz();
+    const char* chipModel = ESP.getChipModel();
+    uint8_t chipCores = ESP.getChipCores();
+    uint32_t uptimeSeconds = millis() / 1000;
+    
+    // Calculate percentages
+    float heapUsedPercent = 100.0f * (totalHeap - freeHeap) / totalHeap;
+    float psramUsedPercent = 0;
+    if (totalPsram > 0) {
+        psramUsedPercent = 100.0f * (totalPsram - freePsram) / totalPsram;
     }
+    float flashUsedPercent = 100.0f * sketchSize / flashSize;
     
-    const VescTelemetry& telem = vescMgr->getTelemetry();
-    String json = generateTelemetryJson(telem);
-    request->send(200, "application/json", json);
-}
-
-void WebServerManager::handleGetStatus(AsyncWebServerRequest* request) {
-    String json = generateStatusJson();
-    request->send(200, "application/json", json);
-}
-
-void WebServerManager::handleVescReboot(AsyncWebServerRequest* request) {
-    if (!vescMgr || !vescMgr->isConnected()) {
-        request->send(503, "application/json", "{\"success\":false,\"error\":\"VESC not connected\"}");
-        return;
-    }
+    // Format uptime
+    uint32_t hours = uptimeSeconds / 3600;
+    uint32_t minutes = (uptimeSeconds % 3600) / 60;
+    uint32_t seconds = uptimeSeconds % 60;
     
-    vescMgr->sendCommand(COMM_REBOOT);
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Reboot command sent\"}");
-}
-
-// ============================================================================
-// WebSocket Handlers
-// ============================================================================
-
-void WebServerManager::onWsEvent(AsyncWebSocket* server, AsyncWebSocketClient* client,
-                                  AwsEventType type, void* arg, uint8_t* data, size_t len) {
-    switch (type) {
-        case WS_EVT_CONNECT:
-            Serial.printf("[Web] WS client #%u connected\n", client->id());
-            break;
-            
-        case WS_EVT_DISCONNECT:
-            Serial.printf("[Web] WS client #%u disconnected\n", client->id());
-            break;
-            
-        case WS_EVT_DATA:
-            handleWsMessage(client, data, len);
-            break;
-            
-        case WS_EVT_PONG:
-            break;
-            
-        case WS_EVT_ERROR:
-            Serial.printf("[Web] WS error on client #%u\n", client->id());
-            break;
-    }
-}
-
-void WebServerManager::handleWsMessage(AsyncWebSocketClient* client, uint8_t* data, size_t len) {
-    // Parse incoming WebSocket message
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, data, len);
-    
-    if (error) {
-        return;
-    }
-    
-    const char* type = doc["type"];
-    if (!type) return;
-    
-    if (strcmp(type, "ping") == 0) {
-        client->text("{\"type\":\"pong\"}");
-    } else if (strcmp(type, "getStatus") == 0) {
-        String status = "{\"type\":\"status\",\"data\":" + generateStatusJson() + "}";
-        client->text(status);
-    } else if (strcmp(type, "getTelemetry") == 0) {
-        if (vescMgr) {
-            String telem = "{\"type\":\"telemetry\",\"data\":" + generateTelemetryJson(vescMgr->getTelemetry()) + "}";
-            client->text(telem);
+    String html = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="5">
+    <title>M5Stack Tab5 - Device Stats</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
         }
-    }
-}
-
-// ============================================================================
-// Telemetry Broadcasting
-// ============================================================================
-
-void WebServerManager::broadcastTelemetry(const VescTelemetry& telemetry) {
-    if (!ws || ws->count() == 0) {
-        return;
-    }
-    
-    String json = "{\"type\":\"telemetry\",\"data\":" + generateTelemetryJson(telemetry) + "}";
-    ws->textAll(json);
-}
-
-String WebServerManager::generateTelemetryJson(const VescTelemetry& telemetry) {
-    JsonDocument doc;
-    
-    doc["voltage"] = telemetry.voltage;
-    doc["currentIn"] = telemetry.currentIn;
-    doc["currentMotor"] = telemetry.currentMotor;
-    doc["peakCurrent"] = telemetry.peakCurrent;
-    doc["rpm"] = telemetry.rpm;
-    doc["ampHours"] = telemetry.ampHours;
-    doc["ampHoursCharged"] = telemetry.ampHoursCharged;
-    doc["wattHours"] = telemetry.wattHours;
-    doc["wattHoursCharged"] = telemetry.wattHoursCharged;
-    doc["tempFet"] = telemetry.tempFet;
-    doc["tempMotor"] = telemetry.tempMotor;
-    doc["duty"] = telemetry.dutyNow;
-    doc["cellCount"] = telemetry.cellCount;
-    doc["cellVoltage"] = telemetry.cellVoltage;
-    doc["batteryPercent"] = telemetry.batteryPercent;
-    doc["faultCode"] = telemetry.faultCode;
-    doc["faultString"] = VescProtocol::faultCodeToString(telemetry.faultCode);
-    doc["tachometer"] = telemetry.tachometer;
-    doc["tachometerAbs"] = telemetry.tachometerAbs;
-    doc["valid"] = telemetry.valid;
-    doc["timestamp"] = millis();
-    
-    // PPM/ADC input values
-    doc["ppmValue"] = telemetry.ppmValue;
-    doc["adcValue"] = telemetry.adcValue;
-    doc["adcValue2"] = telemetry.adcValue2;
-    doc["ppmValid"] = telemetry.ppmValid;
-    doc["adcValid"] = telemetry.adcValid;
-    
-    // Calculate power
-    doc["power"] = telemetry.voltage * telemetry.currentIn;
-    
-    String output;
-    serializeJson(doc, output);
-    return output;
-}
-
-String WebServerManager::generateStatusJson() {
-    JsonDocument doc;
-    
-    doc["connected"] = (vescMgr && vescMgr->isConnected());
-    
-    if (vescMgr) {
-        const BLEDeviceInfo& device = vescMgr->getConnectedDevice();
-        doc["deviceName"] = device.name;
-        doc["deviceAddress"] = device.address;
-        doc["rssi"] = device.rssi;
         
-        BLEState state = vescMgr->getState();
-        switch (state) {
-            case BLE_STATE_IDLE: doc["state"] = "idle"; break;
-            case BLE_STATE_SCANNING: doc["state"] = "scanning"; break;
-            case BLE_STATE_SCAN_COMPLETE: doc["state"] = "scan_complete"; break;
-            case BLE_STATE_CONNECTING: doc["state"] = "connecting"; break;
-            case BLE_STATE_CONNECTED: doc["state"] = "connected"; break;
-            case BLE_STATE_DISCONNECTED: doc["state"] = "disconnected"; break;
-            case BLE_STATE_RECONNECTING: doc["state"] = "reconnecting"; break;
-            default: doc["state"] = "unknown"; break;
+        body {
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+            color: #e6edf3;
+            min-height: 100vh;
+            padding: 40px 20px;
         }
-    }
-    
-    doc["wsClients"] = getClientCount();
-    doc["uptime"] = millis() / 1000;
-    doc["freeHeap"] = ESP.getFreeHeap();
-    doc["freePsram"] = ESP.getFreePsram();
-    
-    String output;
-    serializeJson(doc, output);
-    return output;
-}
-
-// ============================================================================
-// Update Loop
-// ============================================================================
-
-void WebServerManager::update() {
-    if (!isRunning || !ws) {
-        return;
-    }
-    
-    // Clean up disconnected clients
-    ws->cleanupClients();
-    
-    // Broadcast telemetry at defined interval
-    unsigned long now = millis();
-    if (now - lastBroadcast >= TELEMETRY_BROADCAST_MS) {
-        lastBroadcast = now;
         
-        if (vescMgr && vescMgr->hasFreshData()) {
-            broadcastTelemetry(vescMgr->getTelemetry());
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
         }
-    }
-}
-
-// ============================================================================
-// Connection Info
-// ============================================================================
-
-int WebServerManager::getClientCount() {
-    if (!ws) return 0;
-    return ws->count();
-}
-
-bool WebServerManager::hasClients() {
-    return getClientCount() > 0;
+        
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+        
+        h1 {
+            font-size: 2.5rem;
+            color: #58a6ff;
+            margin-bottom: 10px;
+            text-shadow: 0 0 30px rgba(88, 166, 255, 0.3);
+        }
+        
+        .subtitle {
+            color: #8b949e;
+            font-size: 1.1rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(22, 27, 34, 0.8);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .stat-card h3 {
+            color: #8b949e;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 600;
+            color: #58a6ff;
+            margin-bottom: 8px;
+        }
+        
+        .stat-detail {
+            color: #8b949e;
+            font-size: 0.9rem;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: #21262d;
+            border-radius: 4px;
+            margin-top: 12px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-fill.green { background: linear-gradient(90deg, #238636, #3fb950); }
+        .progress-fill.yellow { background: linear-gradient(90deg, #9e6a03, #d29922); }
+        .progress-fill.red { background: linear-gradient(90deg, #da3633, #f85149); }
+        
+        .chip-info {
+            background: rgba(22, 27, 34, 0.8);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .chip-info h2 {
+            color: #58a6ff;
+            margin-bottom: 16px;
+            font-size: 1.2rem;
+        }
+        
+        .chip-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 16px;
+        }
+        
+        .chip-detail {
+            text-align: center;
+        }
+        
+        .chip-detail .label {
+            color: #8b949e;
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+        
+        .chip-detail .value {
+            color: #e6edf3;
+            font-size: 1.1rem;
+            font-weight: 500;
+        }
+        
+        footer {
+            text-align: center;
+            color: #8b949e;
+            font-size: 0.85rem;
+            margin-top: 30px;
+        }
+        
+        .refresh-note {
+            color: #3fb950;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Hello World</h1>
+            <p class="subtitle">M5Stack Tab5 Device Statistics</p>
+        </header>
+        
+        <div class="chip-info">
+            <h2>System Information</h2>
+            <div class="chip-details">
+                <div class="chip-detail">
+                    <div class="label">Chip</div>
+                    <div class="value">)rawliteral" + String(chipModel) + R"rawliteral(</div>
+                </div>
+                <div class="chip-detail">
+                    <div class="label">CPU Cores</div>
+                    <div class="value">)rawliteral" + String(chipCores) + R"rawliteral(</div>
+                </div>
+                <div class="chip-detail">
+                    <div class="label">CPU Frequency</div>
+                    <div class="value">)rawliteral" + String(cpuFreq) + R"rawliteral( MHz</div>
+                </div>
+                <div class="chip-detail">
+                    <div class="label">Uptime</div>
+                    <div class="value">)rawliteral" + String(hours) + "h " + String(minutes) + "m " + String(seconds) + R"rawliteral(s</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Heap Memory (RAM)</h3>
+                <div class="stat-value">)rawliteral" + String(freeHeap / 1024) + R"rawliteral( KB</div>
+                <div class="stat-detail">Free of )rawliteral" + String(totalHeap / 1024) + R"rawliteral( KB total</div>
+                <div class="progress-bar">
+                    <div class="progress-fill )rawliteral" + 
+                        String(heapUsedPercent < 70 ? "green" : (heapUsedPercent < 90 ? "yellow" : "red")) + 
+                        R"rawliteral(" style="width: )rawliteral" + String(heapUsedPercent) + R"rawliteral(%"></div>
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>PSRAM</h3>
+                <div class="stat-value">)rawliteral" + String(freePsram / 1024 / 1024) + R"rawliteral( MB</div>
+                <div class="stat-detail">Free of )rawliteral" + String(totalPsram / 1024 / 1024) + R"rawliteral( MB total</div>
+                <div class="progress-bar">
+                    <div class="progress-fill )rawliteral" + 
+                        String(psramUsedPercent < 70 ? "green" : (psramUsedPercent < 90 ? "yellow" : "red")) + 
+                        R"rawliteral(" style="width: )rawliteral" + String(psramUsedPercent) + R"rawliteral(%"></div>
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>Flash Storage</h3>
+                <div class="stat-value">)rawliteral" + String(flashSize / 1024 / 1024) + R"rawliteral( MB</div>
+                <div class="stat-detail">Sketch uses )rawliteral" + String(sketchSize / 1024) + R"rawliteral( KB ()rawliteral" + String((int)flashUsedPercent) + R"rawliteral(%)</div>
+                <div class="progress-bar">
+                    <div class="progress-fill )rawliteral" + 
+                        String(flashUsedPercent < 70 ? "green" : (flashUsedPercent < 90 ? "yellow" : "red")) + 
+                        R"rawliteral(" style="width: )rawliteral" + String(flashUsedPercent) + R"rawliteral(%"></div>
+                </div>
+            </div>
+            
+            <div class="stat-card">
+                <h3>WiFi</h3>
+                <div class="stat-value">)rawliteral" + WiFi.localIP().toString() + R"rawliteral(</div>
+                <div class="stat-detail">RSSI: )rawliteral" + String(WiFi.RSSI()) + R"rawliteral( dBm</div>
+            </div>
+        </div>
+        
+        <footer>
+            <div class="refresh-note">Auto-refreshing every 5 seconds</div>
+            <div>M5Stack Tab5 Hello World Demo</div>
+        </footer>
+    </div>
+</body>
+</html>
+)rawliteral";
+    
+    return html;
 }
