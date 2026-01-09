@@ -1,123 +1,98 @@
 /**
  * @file main.cpp
- * Hello World - M5Stack Tab5 Demo
+ * BasiliskII ESP32 - Macintosh Emulator for M5Stack Tab5
  * 
- * Features:
- * - Attractive Hello World display
- * - WiFi connection with visual progress
- * - Web server with device stats
+ * This file initializes the hardware and launches the BasiliskII emulator.
  */
 
 #include <Arduino.h>
 #include <M5Unified.h>
 #include <M5GFX.h>
-#include <WiFi.h>
+#include <SD.h>
 #include "config.h"
-#include "ui/ui_init.h"
-#include "web_server.h"
 
-// ============================================================================
-// Display State
-// ============================================================================
+// Forward declarations for BasiliskII functions
+extern void basilisk_setup(void);
+extern void basilisk_loop(void);
+extern bool basilisk_is_running(void);
 
-String wifiStatusText = "Initializing...";
-String ipAddressText = "";
-bool wifiConnected = false;
+// SD card pins for M5Stack Tab5
+#define SD_CLK  39
+#define SD_CMD  44
+#define SD_D0   40
+#define SD_D1   41
+#define SD_D2   42
+#define SD_D3   43
 
 // ============================================================================
 // Display Functions
 // ============================================================================
 
-void drawScreen() {
-    M5Canvas* canvas = ui_get_canvas();
+void showStartupScreen() {
+    M5.Display.fillScreen(TFT_BLACK);
+    M5.Display.setTextColor(TFT_WHITE);
+    M5.Display.setTextSize(2);
     
-    // Clear background with dark color
-    canvas->fillScreen(COLOR_BG_DARK);
+    int centerX = M5.Display.width() / 2;
+    int centerY = M5.Display.height() / 2;
     
-    // Draw "HELLO WORLD" - large and centered
-    canvas->setTextDatum(MC_DATUM);  // Middle center
-    canvas->setTextColor(COLOR_ACCENT_CYAN);
-    canvas->setTextSize(1);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.drawString("BasiliskII ESP32", centerX, centerY - 60);
+    M5.Display.drawString("Macintosh Emulator", centerX, centerY - 20);
     
-    // Use the largest built-in font for the main title
-    canvas->setFont(&fonts::FreeSansBold24pt7b);
-    canvas->drawString("HELLO WORLD", DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 - 80);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString("Initializing...", centerX, centerY + 40);
+}
+
+void showErrorScreen(const char* error) {
+    M5.Display.fillScreen(TFT_MAROON);
+    M5.Display.setTextColor(TFT_WHITE);
+    M5.Display.setTextSize(2);
     
-    // Draw decorative line under the title
-    int lineY = DISPLAY_HEIGHT / 2 - 20;
-    canvas->fillRect(DISPLAY_WIDTH / 2 - 200, lineY, 400, 3, COLOR_ACCENT_CYAN);
+    int centerX = M5.Display.width() / 2;
     
-    // Draw WiFi status
-    canvas->setFont(&fonts::FreeSans18pt7b);
-    canvas->setTextColor(COLOR_TEXT_DIM);
-    canvas->drawString(wifiStatusText, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 + 60);
+    M5.Display.setTextDatum(MC_DATUM);
+    M5.Display.drawString("ERROR", centerX, 100);
+    M5.Display.setTextSize(1);
+    M5.Display.drawString(error, centerX, 160);
+}
+
+// ============================================================================
+// SD Card Initialization
+// ============================================================================
+
+bool initSDCard() {
+    Serial.println("[MAIN] Initializing SD card...");
     
-    // Draw IP address if connected
-    if (wifiConnected && ipAddressText.length() > 0) {
-        canvas->setTextColor(COLOR_ACCENT_GREEN);
-        canvas->setFont(&fonts::FreeSansBold18pt7b);
-        canvas->drawString(ipAddressText, DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 + 120);
+    // Try to initialize SD card
+    // M5Stack Tab5 uses SDMMC interface
+    if (!SD.begin()) {
+        Serial.println("[MAIN] SD.begin() failed, trying with explicit pins...");
         
-        // Draw web server hint
-        canvas->setFont(&fonts::FreeSans12pt7b);
-        canvas->setTextColor(COLOR_TEXT_DIM);
-        canvas->drawString("Web server running on port 80", DISPLAY_WIDTH / 2, DISPLAY_HEIGHT / 2 + 180);
-    }
-    
-    // Push to display
-    ui_push();
-}
-
-void updateWifiStatus(const String& status) {
-    wifiStatusText = status;
-    drawScreen();
-}
-
-// ============================================================================
-// WiFi Connection
-// ============================================================================
-
-void configureSdioPins() {
-    Serial.println("[WiFi] Configuring SDIO pins for ESP32-C6...");
-    WiFi.setPins(SDIO2_CLK, SDIO2_CMD, SDIO2_D0, SDIO2_D1, SDIO2_D2, SDIO2_D3, SDIO2_RST);
-    Serial.println("[WiFi] SDIO pins configured");
-}
-
-bool connectToWifi() {
-    Serial.printf("[WiFi] Connecting to %s...\n", WIFI_SSID);
-    updateWifiStatus("Connecting to " + String(WIFI_SSID) + "...");
-    
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    
-    unsigned long startTime = millis();
-    int dotCount = 0;
-    
-    while (WiFi.status() != WL_CONNECTED) {
-        if (millis() - startTime > WIFI_CONNECT_TIMEOUT_MS) {
-            Serial.println("\n[WiFi] Connection timeout!");
-            updateWifiStatus("Connection failed - timeout");
+        // Try with SPI mode as fallback
+        SPI.begin(SD_CLK, SD_D0, SD_CMD, SD_D3);
+        if (!SD.begin(SD_D3, SPI, 25000000)) {
+            Serial.println("[MAIN] ERROR: SD card initialization failed!");
             return false;
         }
-        
-        // Update display with animated dots
-        dotCount = (dotCount + 1) % 4;
-        String dots = "";
-        for (int i = 0; i < dotCount + 1; i++) {
-            dots += ".";
-        }
-        updateWifiStatus("Connecting to " + String(WIFI_SSID) + dots);
-        
-        Serial.print(".");
-        delay(500);
     }
     
-    Serial.println();
-    Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
+    uint64_t cardSize = SD.cardSize() / (1024 * 1024);
+    Serial.printf("[MAIN] SD card initialized: %lluMB\n", cardSize);
     
-    wifiConnected = true;
-    ipAddressText = WiFi.localIP().toString();
-    updateWifiStatus("Connected to " + String(WIFI_SSID));
+    // Check for required files
+    bool hasROM = SD.exists("/Q650.ROM");
+    bool hasDisk = SD.exists("/Macintosh.dsk");
+    bool hasFloppy = SD.exists("/DiskTools1.img");
+    
+    Serial.printf("[MAIN] Q650.ROM: %s\n", hasROM ? "found" : "MISSING");
+    Serial.printf("[MAIN] Macintosh.dsk: %s\n", hasDisk ? "found" : "MISSING");
+    Serial.printf("[MAIN] DiskTools1.img: %s\n", hasFloppy ? "found" : "MISSING");
+    
+    if (!hasROM) {
+        Serial.println("[MAIN] ERROR: Q650.ROM not found on SD card!");
+        return false;
+    }
     
     return true;
 }
@@ -131,42 +106,43 @@ void setup() {
     auto cfg = M5.config();
     M5.begin(cfg);
     
+    // Initialize serial
     Serial.begin(115200);
     delay(500);
     
     Serial.println("\n\n========================================");
-    Serial.println("   Hello World - M5Stack Tab5");
+    Serial.println("  BasiliskII ESP32 - Macintosh Emulator");
+    Serial.println("  M5Stack Tab5 Edition");
     Serial.println("========================================\n");
     
     // Configure display orientation (landscape)
     M5.Display.setRotation(3);
-    M5.Display.fillScreen(TFT_BLACK);
     
-    Serial.printf("[App] Display: %dx%d\n", M5.Display.width(), M5.Display.height());
-    Serial.printf("[App] Free heap: %d bytes\n", ESP.getFreeHeap());
-    Serial.printf("[App] Free PSRAM: %d bytes\n", ESP.getFreePsram());
+    // Show startup screen
+    showStartupScreen();
     
-    // Initialize UI canvas
-    Serial.println("[App] Initializing display...");
-    ui_init();
+    // Print system info
+    Serial.printf("[MAIN] Display: %dx%d\n", M5.Display.width(), M5.Display.height());
+    Serial.printf("[MAIN] Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("[MAIN] Free PSRAM: %d bytes\n", ESP.getFreePsram());
+    Serial.printf("[MAIN] Total PSRAM: %d bytes\n", ESP.getPsramSize());
+    Serial.printf("[MAIN] CPU Freq: %d MHz\n", ESP.getCpuFreqMHz());
     
-    // Initial draw
-    drawScreen();
-    
-    // Configure WiFi SDIO pins (required for Tab5)
-    configureSdioPins();
-    
-    // Connect to WiFi
-    if (connectToWifi()) {
-        // Start web server
-        Serial.println("[App] Starting web server...");
-        webServer.begin();
-        Serial.println("[App] Web server started on port 80");
-    } else {
-        Serial.println("[App] WiFi connection failed, web server not started");
+    // Initialize SD card
+    if (!initSDCard()) {
+        showErrorScreen("SD card or ROM file not found");
+        Serial.println("[MAIN] Halting - SD card initialization failed");
+        while (1) {
+            delay(1000);
+        }
     }
     
-    Serial.println("[App] Setup complete\n");
+    // Launch BasiliskII emulator
+    Serial.println("[MAIN] Starting BasiliskII emulator...");
+    basilisk_setup();
+    
+    // If we get here, emulator has exited
+    Serial.println("[MAIN] Emulator exited");
 }
 
 // ============================================================================
@@ -177,6 +153,7 @@ void loop() {
     // Update M5Stack (handles touch, buttons)
     M5.update();
     
-    // Small delay to prevent CPU hogging
-    delay(10);
+    // The emulator runs its own loop in basilisk_setup()
+    // This loop is reached after emulator exits
+    delay(100);
 }
