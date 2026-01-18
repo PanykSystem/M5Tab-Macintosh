@@ -275,4 +275,10 @@ extern void VideoInterrupt(void);
 extern void VideoRefresh(void);
 extern void VideoSignalFrameReady(void);  // Signal video task that a new frame is ready (non-blocking)
 
+// Write-time dirty tracking for framebuffer - called from memory.cpp on writes
+// These mark tiles dirty immediately when CPU writes to framebuffer, avoiding
+// expensive per-frame comparison
+extern void VideoMarkDirtyOffset(uint32 offset);     // Mark single byte dirty
+extern void VideoMarkDirtyRange(uint32 offset, uint32 size);  // Mark range dirty
+
 #endif

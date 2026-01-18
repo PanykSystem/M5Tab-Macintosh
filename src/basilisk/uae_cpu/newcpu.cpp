@@ -26,9 +26,10 @@
 
 #include "sysdeps.h"
 
-// ESP32 PSRAM support for large data structures
+// ESP32 PSRAM support for large data structures and IRAM placement
 #ifdef ARDUINO
 #include <esp_heap_caps.h>
+#include <esp_attr.h>  // For IRAM_ATTR
 #endif
 
 #include "cpu_emulation.h"
@@ -1446,6 +1447,11 @@ int m68k_do_specialties (void)
 	return 0;
 }
 
+// Place the main CPU execution loop in internal RAM for faster execution
+// This is the hottest path in the emulator - runs for every 68k instruction
+#ifdef ARDUINO
+IRAM_ATTR
+#endif
 void m68k_do_execute (void)
 {
 	for (;;) {

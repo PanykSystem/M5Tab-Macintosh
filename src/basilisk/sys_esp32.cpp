@@ -21,13 +21,14 @@
 #define DEBUG 0
 #include "debug.h"
 
-// File handle structure - minimal
+// File handle structure - minimal with dirty tracking
 struct file_handle {
     File file;
     bool is_open;
     bool read_only;
     bool is_floppy;
     bool is_cdrom;
+    bool is_dirty;      // Track if there are pending writes to flush
     loff_t size;
     char path[256];
 };
@@ -82,14 +83,17 @@ static void unregister_file_handle(file_handle *fh)
 /*
  *  Periodic flush - ensures data is written to SD card
  *  Called every 2 seconds from main loop
+ *  
+ *  OPTIMIZED: Only flushes handles that have been written to since last flush.
+ *  This avoids unnecessary SD card operations when files haven't changed.
  */
 void Sys_periodic_flush(void)
 {
     for (int i = 0; i < 16; i++) {
-        if (open_file_handles[i] != NULL && 
-            open_file_handles[i]->is_open && 
-            !open_file_handles[i]->read_only) {
-            open_file_handles[i]->file.flush();
+        file_handle *fh = open_file_handles[i];
+        if (fh != NULL && fh->is_open && !fh->read_only && fh->is_dirty) {
+            fh->file.flush();
+            fh->is_dirty = false;  // Clear dirty flag after flush
         }
     }
 }
@@ -337,6 +341,7 @@ size_t Sys_read(void *arg, void *buffer, loff_t offset, size_t length)
 
 /*
  *  Write to a file/device - direct write, no buffering
+ *  Marks handle dirty for deferred flush
  */
 size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
 {
@@ -349,7 +354,11 @@ size_t Sys_write(void *arg, void *buffer, loff_t offset, size_t length)
         return 0;
     }
     
-    return fh->file.write((uint8_t *)buffer, length);
+    size_t written = fh->file.write((uint8_t *)buffer, length);
+    if (written > 0) {
+        fh->is_dirty = true;  // Mark for deferred flush
+    }
+    return written;
 }
 
 /*

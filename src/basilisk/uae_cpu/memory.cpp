@@ -374,6 +374,8 @@ void REGPARAM2 frame_direct_lput(uaecptr addr, uae_u32 l)
     uae_u32 *m;
     m = (uae_u32 *)(FrameBaseDiff + addr);
     do_put_mem_long(m, l);
+    // Mark dirty tiles for write-time tracking (offset from frame buffer base)
+    VideoMarkDirtyRange(addr - MacFrameBaseMac, 4);
 }
 
 void REGPARAM2 frame_direct_wput(uaecptr addr, uae_u32 w)
@@ -381,11 +383,15 @@ void REGPARAM2 frame_direct_wput(uaecptr addr, uae_u32 w)
     uae_u16 *m;
     m = (uae_u16 *)(FrameBaseDiff + addr);
     do_put_mem_word(m, w);
+    // Mark dirty tiles for write-time tracking
+    VideoMarkDirtyRange(addr - MacFrameBaseMac, 2);
 }
 
 void REGPARAM2 frame_direct_bput(uaecptr addr, uae_u32 b)
 {
     *(uae_u8 *)(FrameBaseDiff + addr) = b;
+    // Mark dirty tile for write-time tracking
+    VideoMarkDirtyOffset(addr - MacFrameBaseMac);
 }
 
 uae_u32 REGPARAM2 frame_host_555_lget(uaecptr addr)
@@ -485,6 +491,8 @@ void REGPARAM2 fram24_lput(uaecptr addr, uae_u32 l)
 	uae_u32 *fm;
 	fm = (uae_u32 *)(MacFrameBaseHost + page_off - 0xa700);
 	do_put_mem_long(fm, l);
+	// Mark dirty tiles for write-time tracking (24-bit addressing)
+	VideoMarkDirtyRange(page_off - 0xa700, 4);
     }
 
     uae_u32 *m;
@@ -499,6 +507,8 @@ void REGPARAM2 fram24_wput(uaecptr addr, uae_u32 w)
 	uae_u16 *fm;
 	fm = (uae_u16 *)(MacFrameBaseHost + page_off - 0xa700);
 	do_put_mem_word(fm, w);
+	// Mark dirty tiles for write-time tracking
+	VideoMarkDirtyRange(page_off - 0xa700, 2);
     }
 
     uae_u16 *m;
@@ -511,6 +521,8 @@ void REGPARAM2 fram24_bput(uaecptr addr, uae_u32 b)
     uaecptr page_off = addr & 0xffff;
     if (0xa700 <= page_off && page_off < 0xfc80) {
         *(uae_u8 *)(MacFrameBaseHost + page_off - 0xa700) = b;
+        // Mark dirty tile for write-time tracking
+        VideoMarkDirtyOffset(page_off - 0xa700);
     }
 
     *(uae_u8 *)(RAMBaseDiff + (addr & 0xffffff)) = b;

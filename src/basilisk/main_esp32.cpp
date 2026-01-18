@@ -98,8 +98,26 @@ static uint32 last_disk_flush_time = 0;
 // Disk flush interval (ms) - how often to flush write buffer to SD card
 #define DISK_FLUSH_INTERVAL 2000  // 2 seconds
 
+// Input polling interval (ms) - poll at 60Hz instead of every tick
+// This reduces CPU overhead while maintaining responsive input
+#define INPUT_POLL_INTERVAL 16  // ~60Hz
+
 // FreeRTOS timer for 60Hz tick
 static TimerHandle_t timer_60hz = NULL;
+
+// Input polling state
+static uint32 last_input_poll_time = 0;
+
+// ============================================================================
+// Performance profiling counters for main loop
+// ============================================================================
+static uint32 perf_loop_count = 0;           // Number of basilisk_loop calls
+static uint32 perf_input_us = 0;             // Time spent in input polling
+static uint32 perf_input_count = 0;          // Number of input polls
+static uint32 perf_flush_us = 0;             // Time spent in disk flush
+static uint32 perf_flush_count = 0;          // Number of flushes
+static uint32 perf_main_last_report = 0;     // Last time stats were printed
+#define PERF_MAIN_REPORT_INTERVAL_MS 5000    // Report every 5 seconds
 
 /*
  *  Set/clear interrupt flags (thread-safe using atomic operations)
@@ -467,18 +485,47 @@ void basilisk_setup(void)
 }
 
 /*
+ *  Report main loop performance stats periodically
+ */
+static void reportMainPerfStats(uint32 current_time)
+{
+    if (current_time - perf_main_last_report >= PERF_MAIN_REPORT_INTERVAL_MS) {
+        perf_main_last_report = current_time;
+        
+        if (perf_loop_count > 0) {
+            uint32 loops_per_sec = (perf_loop_count * 1000) / PERF_MAIN_REPORT_INTERVAL_MS;
+            Serial.printf("[MAIN PERF] loops/sec=%u input_polls=%u input_avg=%uus flushes=%u flush_avg=%uus\n",
+                          loops_per_sec,
+                          perf_input_count,
+                          perf_input_count > 0 ? perf_input_us / perf_input_count : 0,
+                          perf_flush_count,
+                          perf_flush_count > 0 ? perf_flush_us / perf_flush_count : 0);
+        }
+        
+        // Reset counters
+        perf_loop_count = 0;
+        perf_input_us = 0;
+        perf_input_count = 0;
+        perf_flush_us = 0;
+        perf_flush_count = 0;
+    }
+}
+
+/*
  *  Arduino loop function - called periodically during emulation
  *  This is called from the CPU emulator's main loop to handle periodic tasks
  *
  *  With dual-core optimization:
  *  - 60Hz tick is polled here (safer than async timer)
  *  - Video refresh is handled by video task on Core 0 (doesn't block here)
- *  - Input polling happens here (touch panel, USB HID)
+ *  - Input polling happens at 60Hz (not every tick) to reduce overhead
  *  - This function is lightweight - no rendering happens here
  */
 void basilisk_loop(void)
 {
     uint32 current_time = millis();
+    
+    perf_loop_count++;
     
     // Handle 60Hz tick (~16ms intervals)
     if (current_time - last_60hz_time >= 16) {
@@ -503,13 +550,29 @@ void basilisk_loop(void)
     // Time check done here to avoid function call overhead on every tick
     if (current_time - last_disk_flush_time >= DISK_FLUSH_INTERVAL) {
         last_disk_flush_time = current_time;
+        uint32 t0 = micros();
         Sys_periodic_flush();
+        uint32 t1 = micros();
+        perf_flush_us += (t1 - t0);
+        perf_flush_count++;
     }
     
-    // Poll for input events (touch panel, USB keyboard/mouse)
-    // This updates M5.Touch state and forwards events to ADB
-    M5.update();
-    InputPoll();
+    // Poll for input events at 60Hz (not every tick)
+    // This reduces CPU overhead while maintaining responsive input
+    // Input is still polled at 60Hz which is sufficient for UI responsiveness
+    if (current_time - last_input_poll_time >= INPUT_POLL_INTERVAL) {
+        last_input_poll_time = current_time;
+        
+        uint32 t0 = micros();
+        M5.update();
+        InputPoll();
+        uint32 t1 = micros();
+        perf_input_us += (t1 - t0);
+        perf_input_count++;
+    }
+    
+    // Report performance stats periodically
+    reportMainPerfStats(current_time);
     
     // Yield to allow FreeRTOS tasks to run
     taskYIELD();

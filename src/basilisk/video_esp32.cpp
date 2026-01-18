@@ -122,9 +122,18 @@ static uint8 *compare_buffer = NULL;                         // Previous rendere
 #ifdef ARDUINO
 __attribute__((section(".dram0.data")))
 #endif
-static uint32 dirty_tiles[(TOTAL_TILES + 31) / 32];          // Bitmap of dirty tiles
+static uint32 dirty_tiles[(TOTAL_TILES + 31) / 32];          // Bitmap of dirty tiles (read by video task)
+
+// Write-time dirty tracking bitmap - marked when CPU writes to framebuffer
+// This is double-buffered to avoid race conditions between CPU writes and video task reads
+#ifdef ARDUINO
+__attribute__((section(".dram0.data")))
+#endif
+static uint32 write_dirty_tiles[(TOTAL_TILES + 31) / 32];    // Tiles dirtied by CPU writes
+
 static volatile bool force_full_update = true;               // Force full update on first frame or palette change
 static int dirty_tile_count = 0;                             // Count of dirty tiles for threshold check
+static volatile bool use_write_dirty_tracking = true;        // Use write-time dirty tracking (faster)
 
 // Display dimensions (from M5.Display)
 static int display_width = 0;
@@ -132,6 +141,20 @@ static int display_height = 0;
 
 // Video mode info
 static video_mode current_mode;
+
+// ============================================================================
+// Performance profiling counters (lightweight, always enabled)
+// ============================================================================
+static volatile uint32_t perf_snapshot_us = 0;      // Time to take frame snapshot
+static volatile uint32_t perf_detect_us = 0;        // Time to detect dirty tiles
+static volatile uint32_t perf_render_us = 0;        // Time to render frame
+static volatile uint32_t perf_push_us = 0;          // Time to push to display
+static volatile uint32_t perf_frame_count = 0;      // Frames rendered
+static volatile uint32_t perf_partial_count = 0;    // Partial updates
+static volatile uint32_t perf_full_count = 0;       // Full updates
+static volatile uint32_t perf_skip_count = 0;       // Skipped frames (no changes)
+static volatile uint32_t perf_last_report_ms = 0;   // Last time stats were printed
+#define PERF_REPORT_INTERVAL_MS 5000                // Report every 5 seconds
 
 // Monitor descriptor for ESP32
 class ESP32_monitor_desc : public monitor_desc {
@@ -274,6 +297,79 @@ static inline bool isTileDirty(int tile_idx)
 }
 
 /*
+ *  Mark a tile as dirty at write-time (called from frame buffer put functions)
+ *  This is MUCH faster than per-frame comparison as it only runs on actual writes.
+ *  
+ *  @param offset  Byte offset into the Mac framebuffer (0 to MAC_SCREEN_WIDTH*MAC_SCREEN_HEIGHT-1)
+ */
+void VideoMarkDirtyOffset(uint32 offset)
+{
+    if (!use_write_dirty_tracking) return;
+    if (offset >= frame_buffer_size) return;
+    
+    // Calculate tile coordinates from framebuffer offset
+    int y = offset / MAC_SCREEN_WIDTH;
+    int x = offset % MAC_SCREEN_WIDTH;
+    int tile_x = x / TILE_WIDTH;
+    int tile_y = y / TILE_HEIGHT;
+    int tile_idx = tile_y * TILES_X + tile_x;
+    
+    // Mark tile dirty using atomic OR (thread-safe for concurrent CPU writes)
+    __atomic_or_fetch(&write_dirty_tiles[tile_idx / 32], (1u << (tile_idx % 32)), __ATOMIC_RELAXED);
+}
+
+/*
+ *  Mark a range of tiles as dirty at write-time
+ *  Used for multi-byte writes (lput, wput)
+ *  
+ *  @param offset  Starting byte offset into the Mac framebuffer
+ *  @param size    Number of bytes being written
+ */
+void VideoMarkDirtyRange(uint32 offset, uint32 size)
+{
+    if (!use_write_dirty_tracking) return;
+    if (offset >= frame_buffer_size) return;
+    
+    // Clamp size to framebuffer bounds
+    if (offset + size > frame_buffer_size) {
+        size = frame_buffer_size - offset;
+    }
+    
+    // Mark start tile
+    VideoMarkDirtyOffset(offset);
+    
+    // Mark end tile if different from start
+    if (size > 1) {
+        VideoMarkDirtyOffset(offset + size - 1);
+    }
+}
+
+/*
+ *  Collect write-dirty tiles into the render dirty bitmap and clear write bitmap
+ *  Returns the number of dirty tiles
+ *  Called at the start of each video frame
+ */
+static int collectWriteDirtyTiles(void)
+{
+    int count = 0;
+    
+    // Copy write_dirty_tiles to dirty_tiles and count
+    for (int i = 0; i < (TOTAL_TILES + 31) / 32; i++) {
+        // Atomically read and clear the write dirty bitmap
+        uint32 bits = __atomic_exchange_n(&write_dirty_tiles[i], 0, __ATOMIC_RELAXED);
+        dirty_tiles[i] = bits;
+        
+        // Count set bits (popcount)
+        while (bits) {
+            count += (bits & 1);
+            bits >>= 1;
+        }
+    }
+    
+    return count;
+}
+
+/*
  *  Take an atomic snapshot of the mac_frame_buffer
  *  This ensures we have a consistent frame to work with while CPU continues writing
  */
@@ -362,17 +458,191 @@ static void renderTile(uint8 *src_buffer, int tile_x, int tile_y, uint16 *local_
 }
 
 /*
+ *  Render a single tile directly to a contiguous buffer (for partial updates)
+ *  OPTIMIZED: Renders directly to push buffer, avoiding the DSI framebuffer copy.
+ *  
+ *  @param src_buffer      Mac framebuffer (8-bit indexed)
+ *  @param tile_x          Tile column index (0 to TILES_X-1)
+ *  @param tile_y          Tile row index (0 to TILES_Y-1)
+ *  @param local_palette   Pre-copied palette for thread safety
+ *  @param out_buffer      Output buffer (contiguous, tile_pixel_width * tile_pixel_height pixels)
+ */
+static void renderTileToBuffer(uint8 *src_buffer, int tile_x, int tile_y, 
+                                uint16 *local_palette, uint16 *out_buffer)
+{
+    // Calculate source position in Mac framebuffer
+    int src_start_x = tile_x * TILE_WIDTH;
+    int src_start_y = tile_y * TILE_HEIGHT;
+    int tile_pixel_width = TILE_WIDTH * PIXEL_SCALE;  // 80 pixels
+    
+    // Output buffer pointer
+    uint16 *out = out_buffer;
+    
+    // Process each row of the Mac tile
+    for (int row = 0; row < TILE_HEIGHT; row++) {
+        int src_y = src_start_y + row;
+        
+        // Source row pointer
+        uint8 *src = src_buffer + src_y * MAC_SCREEN_WIDTH + src_start_x;
+        
+        // Output row pointers (two rows for 2x vertical scaling)
+        uint16 *dst_row0 = out;
+        uint16 *dst_row1 = out + tile_pixel_width;
+        
+        // Process 4 pixels at a time for better memory bandwidth
+        int x = 0;
+        for (; x < TILE_WIDTH - 3; x += 4) {
+            // Read 4 source pixels at once (32-bit read)
+            uint32 src4 = *((uint32 *)src);
+            src += 4;
+            
+            // Convert each pixel through palette and write 2x2 scaled
+            uint16 c0 = local_palette[src4 & 0xFF];
+            uint16 c1 = local_palette[(src4 >> 8) & 0xFF];
+            uint16 c2 = local_palette[(src4 >> 16) & 0xFF];
+            uint16 c3 = local_palette[(src4 >> 24) & 0xFF];
+            
+            // Write to row 0 (2 pixels per source pixel)
+            dst_row0[0] = c0; dst_row0[1] = c0;
+            dst_row0[2] = c1; dst_row0[3] = c1;
+            dst_row0[4] = c2; dst_row0[5] = c2;
+            dst_row0[6] = c3; dst_row0[7] = c3;
+            
+            // Write to row 1 (duplicate of row 0)
+            dst_row1[0] = c0; dst_row1[1] = c0;
+            dst_row1[2] = c1; dst_row1[3] = c1;
+            dst_row1[4] = c2; dst_row1[5] = c2;
+            dst_row1[6] = c3; dst_row1[7] = c3;
+            
+            dst_row0 += 8;
+            dst_row1 += 8;
+        }
+        
+        // Handle remaining pixels (TILE_WIDTH=40 is divisible by 4, so this rarely runs)
+        for (; x < TILE_WIDTH; x++) {
+            uint16 c = local_palette[*src++];
+            dst_row0[0] = c; dst_row0[1] = c;
+            dst_row1[0] = c; dst_row1[1] = c;
+            dst_row0 += 2;
+            dst_row1 += 2;
+        }
+        
+        // Move output pointer by 2 rows (2x vertical scaling)
+        out += tile_pixel_width * 2;
+    }
+}
+
+/*
+ *  Copy a single tile's source data from framebuffer to a snapshot buffer
+ *  This creates a consistent snapshot of the tile to avoid race conditions
+ *  when the CPU is writing to the framebuffer while we're rendering.
+ *  
+ *  @param src_buffer     Mac framebuffer (8-bit indexed)
+ *  @param tile_x         Tile column index (0 to TILES_X-1)
+ *  @param tile_y         Tile row index (0 to TILES_Y-1)
+ *  @param snapshot       Output buffer (TILE_WIDTH * TILE_HEIGHT bytes)
+ */
+static void snapshotTile(uint8 *src_buffer, int tile_x, int tile_y, uint8 *snapshot)
+{
+    int src_start_x = tile_x * TILE_WIDTH;
+    int src_start_y = tile_y * TILE_HEIGHT;
+    
+    // Copy each row of the tile to the contiguous snapshot buffer
+    uint8 *dst = snapshot;
+    for (int row = 0; row < TILE_HEIGHT; row++) {
+        uint8 *src = src_buffer + (src_start_y + row) * MAC_SCREEN_WIDTH + src_start_x;
+        memcpy(dst, src, TILE_WIDTH);
+        dst += TILE_WIDTH;
+    }
+}
+
+/*
+ *  Render a tile from a contiguous snapshot buffer (not from framebuffer)
+ *  This ensures we render from consistent data that won't change mid-render.
+ *  
+ *  @param snapshot        Tile snapshot buffer (TILE_WIDTH * TILE_HEIGHT bytes, contiguous)
+ *  @param local_palette   Pre-copied palette for thread safety
+ *  @param out_buffer      Output buffer for RGB565 pixels
+ */
+static void renderTileFromSnapshot(uint8 *snapshot, uint16 *local_palette, uint16 *out_buffer)
+{
+    int tile_pixel_width = TILE_WIDTH * PIXEL_SCALE;  // 80 pixels
+    
+    uint8 *src = snapshot;
+    uint16 *out = out_buffer;
+    
+    // Process each row of the Mac tile
+    for (int row = 0; row < TILE_HEIGHT; row++) {
+        // Output row pointers (two rows for 2x vertical scaling)
+        uint16 *dst_row0 = out;
+        uint16 *dst_row1 = out + tile_pixel_width;
+        
+        // Process 4 pixels at a time for better memory bandwidth
+        int x = 0;
+        for (; x < TILE_WIDTH - 3; x += 4) {
+            // Read 4 source pixels at once (32-bit read)
+            uint32 src4 = *((uint32 *)src);
+            src += 4;
+            
+            // Convert each pixel through palette and write 2x2 scaled
+            uint16 c0 = local_palette[src4 & 0xFF];
+            uint16 c1 = local_palette[(src4 >> 8) & 0xFF];
+            uint16 c2 = local_palette[(src4 >> 16) & 0xFF];
+            uint16 c3 = local_palette[(src4 >> 24) & 0xFF];
+            
+            // Write to row 0 (2 pixels per source pixel)
+            dst_row0[0] = c0; dst_row0[1] = c0;
+            dst_row0[2] = c1; dst_row0[3] = c1;
+            dst_row0[4] = c2; dst_row0[5] = c2;
+            dst_row0[6] = c3; dst_row0[7] = c3;
+            
+            // Write to row 1 (duplicate of row 0)
+            dst_row1[0] = c0; dst_row1[1] = c0;
+            dst_row1[2] = c1; dst_row1[3] = c1;
+            dst_row1[4] = c2; dst_row1[5] = c2;
+            dst_row1[6] = c3; dst_row1[7] = c3;
+            
+            dst_row0 += 8;
+            dst_row1 += 8;
+        }
+        
+        // Handle remaining pixels (TILE_WIDTH=40 is divisible by 4, so this rarely runs)
+        for (; x < TILE_WIDTH; x++) {
+            uint16 c = local_palette[*src++];
+            dst_row0[0] = c; dst_row0[1] = c;
+            dst_row1[0] = c; dst_row1[1] = c;
+            dst_row0 += 2;
+            dst_row1 += 2;
+        }
+        
+        // Move output pointer by 2 rows (2x vertical scaling)
+        out += tile_pixel_width * 2;
+    }
+}
+
+/*
  *  Render and push only dirty tiles to the display
- *  Much more efficient than full screen updates when only small regions change
+ *  RACE-CONDITION FIX: Takes a mini-snapshot of each tile before rendering.
+ *  
+ *  This prevents visual glitches (especially around the mouse cursor) caused by
+ *  the CPU writing to the framebuffer while we're reading it. The cost is a small
+ *  memcpy per dirty tile (~1.6KB), but this is much cheaper than a full frame
+ *  snapshot and eliminates the race condition.
  *  
  *  @param src_buffer     Mac framebuffer (8-bit indexed)
  *  @param local_palette  Pre-copied palette for thread safety
  */
 static void renderAndPushDirtyTiles(uint8 *src_buffer, uint16 *local_palette)
 {
-    // Temporary buffer for one tile (80x80 pixels = 12,800 bytes)
-    // Allocated on stack - fits easily in video task's 8KB stack
+    // Temporary buffer for one tile's source data (40x40 = 1600 bytes)
+    // Static to avoid stack allocation on each call
+    static uint8 tile_snapshot[TILE_WIDTH * TILE_HEIGHT];
+    
+    // Temporary buffer for one tile's RGB565 output (80x80 = 12,800 bytes)
     static uint16 tile_buffer[TILE_WIDTH * PIXEL_SCALE * TILE_HEIGHT * PIXEL_SCALE];
+    
+    int tile_pixel_width = TILE_WIDTH * PIXEL_SCALE;
+    int tile_pixel_height = TILE_HEIGHT * PIXEL_SCALE;
     
     M5.Display.startWrite();
     
@@ -385,24 +655,20 @@ static void renderAndPushDirtyTiles(uint8 *src_buffer, uint16 *local_palette)
                 continue;
             }
             
-            // Render tile to DSI framebuffer (for our local copy)
-            renderTile(src_buffer, tx, ty, local_palette);
+            // STEP 1: Take a mini-snapshot of just this tile
+            // This ensures we read consistent data even if CPU is writing
+            snapshotTile(src_buffer, tx, ty, tile_snapshot);
             
-            // Copy tile from DSI framebuffer to contiguous tile buffer
-            // This is needed because DSI framebuffer rows are DISPLAY_WIDTH apart
-            int dst_start_x = tx * TILE_WIDTH * PIXEL_SCALE;
-            int dst_start_y = ty * TILE_HEIGHT * PIXEL_SCALE;
-            int tile_pixel_width = TILE_WIDTH * PIXEL_SCALE;
-            int tile_pixel_height = TILE_HEIGHT * PIXEL_SCALE;
+            // Memory barrier to ensure snapshot is complete before rendering
+            __sync_synchronize();
             
-            uint16 *tile_ptr = tile_buffer;
-            for (int row = 0; row < tile_pixel_height; row++) {
-                uint16 *src_row = dsi_framebuffer + (dst_start_y + row) * DISPLAY_WIDTH + dst_start_x;
-                memcpy(tile_ptr, src_row, tile_pixel_width * sizeof(uint16));
-                tile_ptr += tile_pixel_width;
-            }
+            // STEP 2: Render from the snapshot (not from the live framebuffer)
+            renderTileFromSnapshot(tile_snapshot, local_palette, tile_buffer);
             
-            // Push tile to display
+            // STEP 3: Push to display
+            int dst_start_x = tx * tile_pixel_width;
+            int dst_start_y = ty * tile_pixel_height;
+            
             M5.Display.setAddrWindow(dst_start_x, dst_start_y, tile_pixel_width, tile_pixel_height);
             M5.Display.writePixels(tile_buffer, tile_pixel_width * tile_pixel_height);
         }
@@ -630,21 +896,53 @@ static void pushFramebufferToDisplay(void)
 }
 
 /*
- *  Optimized video rendering task - uses triple buffering and dirty tile tracking
+ *  Report video performance stats periodically
+ */
+static void reportVideoPerfStats(void)
+{
+    uint32_t now = millis();
+    if (now - perf_last_report_ms >= PERF_REPORT_INTERVAL_MS) {
+        perf_last_report_ms = now;
+        
+        uint32_t total_frames = perf_full_count + perf_partial_count + perf_skip_count;
+        if (total_frames > 0) {
+            Serial.printf("[VIDEO PERF] frames=%u (full=%u partial=%u skip=%u)\n",
+                          total_frames, perf_full_count, perf_partial_count, perf_skip_count);
+            Serial.printf("[VIDEO PERF] avg: snapshot=%uus detect=%uus render=%uus push=%uus\n",
+                          perf_snapshot_us / (total_frames > 0 ? total_frames : 1),
+                          perf_detect_us / (total_frames > 0 ? total_frames : 1),
+                          perf_render_us / (total_frames > 0 ? total_frames : 1),
+                          perf_push_us / (total_frames > 0 ? total_frames : 1));
+        }
+        
+        // Reset counters for next interval
+        perf_snapshot_us = 0;
+        perf_detect_us = 0;
+        perf_render_us = 0;
+        perf_push_us = 0;
+        perf_frame_count = 0;
+        perf_partial_count = 0;
+        perf_full_count = 0;
+        perf_skip_count = 0;
+    }
+}
+
+/*
+ *  Optimized video rendering task - uses WRITE-TIME dirty tracking
  *  
- *  Triple buffer flow (eliminates race conditions):
- *  1. Take atomic snapshot of mac_frame_buffer → snapshot_buffer
- *  2. Compare snapshot_buffer vs compare_buffer → find dirty tiles
- *  3. Render from snapshot_buffer (CPU can continue writing to mac_frame_buffer)
- *  4. Swap buffers: snapshot becomes new compare for next frame
+ *  Key optimizations over the old triple-buffer approach:
+ *  1. NO frame snapshot copy - we read directly from mac_frame_buffer
+ *  2. NO per-frame comparison - dirty tiles are marked at write time by memory.cpp
+ *  3. Event-driven with timeout - wakes on notification OR after 67ms max
  *  
- *  This significantly reduces CPU usage when the screen is mostly static
- *  (common in Mac OS with desktop, dialogs, etc.)
+ *  This eliminates ~230KB memcpy per frame and expensive tile comparisons.
+ *  Dirty tracking overhead is spread across actual CPU writes instead of
+ *  being a bulk operation every frame.
  */
 static void videoRenderTaskOptimized(void *param)
 {
     UNUSED(param);
-    Serial.println("[VIDEO] Optimized video render task started on Core 0 (triple buffered)");
+    Serial.println("[VIDEO] Video render task started on Core 0 (write-time dirty tracking)");
     
     // Unsubscribe this task from the watchdog timer
     esp_task_wdt_delete(NULL);
@@ -655,66 +953,121 @@ static void videoRenderTaskOptimized(void *param)
     // Local palette copy for thread safety
     uint16 local_palette[256];
     
+    // Initialize perf reporting timer
+    perf_last_report_ms = millis();
+    
+    // Minimum frame interval (67ms = ~15 FPS)
+    const TickType_t min_frame_ticks = pdMS_TO_TICKS(67);
+    TickType_t last_frame_ticks = xTaskGetTickCount();
+    
     while (video_task_running) {
-        // Check if a new frame is ready
-        if (frame_ready) {
-            frame_ready = false;
+        // Event-driven: wait for frame signal with timeout
+        // This replaces the old polling loop - task sleeps until signaled
+        // Max wait time ensures we still render periodically even if no signal
+        uint32_t notification = ulTaskNotifyTake(pdTRUE, min_frame_ticks);
+        
+        // Also check legacy frame_ready flag for compatibility
+        bool should_render = (notification > 0) || frame_ready;
+        frame_ready = false;
+        
+        // Rate limit: ensure minimum time between frames
+        TickType_t now = xTaskGetTickCount();
+        TickType_t elapsed = now - last_frame_ticks;
+        if (should_render && elapsed < min_frame_ticks) {
+            // Too soon - skip this frame signal, we'll render on next timeout
+            continue;
+        }
+        
+        // Only render if we have something to render
+        if (!should_render && !force_full_update) {
+            // Timeout with nothing to do - check for write-dirty tiles anyway
+            // This handles cases where writes happened but no explicit signal
+        }
+        
+        uint32_t t0, t1;
+        
+        // Take a snapshot of the palette (thread-safe)
+        portENTER_CRITICAL(&frame_spinlock);
+        memcpy(local_palette, palette_rgb565, 256 * sizeof(uint16));
+        portEXIT_CRITICAL(&frame_spinlock);
+        
+        // Check if we need a full update (first frame, palette change, etc.)
+        bool do_full_update = force_full_update;
+        
+        if (!do_full_update && use_write_dirty_tracking) {
+            // WRITE-TIME DIRTY TRACKING: Collect dirty tiles marked by CPU writes
+            // This is MUCH faster than frame comparison - just atomically reads and clears
+            // the dirty bitmap that was populated by frame_direct_*_put calls
+            t0 = micros();
+            dirty_tile_count = collectWriteDirtyTiles();
+            t1 = micros();
+            perf_detect_us += (t1 - t0);
             
-            // STEP 1: Take atomic snapshot of the current frame
-            // This ensures we work with consistent data while CPU continues writing
+            // If too many tiles are dirty, do a full update instead
+            // (reduces overhead of many small transfers)
+            int dirty_threshold = (TOTAL_TILES * DIRTY_THRESHOLD_PERCENT) / 100;
+            if (dirty_tile_count > dirty_threshold) {
+                do_full_update = true;
+                D(bug("[VIDEO] %d/%d tiles dirty (>%d%%), doing full update\n", 
+                      dirty_tile_count, TOTAL_TILES, DIRTY_THRESHOLD_PERCENT));
+            }
+        } else if (!do_full_update) {
+            // Fallback: use frame comparison (legacy path)
+            t0 = micros();
             takeFrameSnapshot();
+            t1 = micros();
+            perf_snapshot_us += (t1 - t0);
             
-            // Take a snapshot of the palette (thread-safe)
-            portENTER_CRITICAL(&frame_spinlock);
-            memcpy(local_palette, palette_rgb565, 256 * sizeof(uint16));
-            portEXIT_CRITICAL(&frame_spinlock);
+            t0 = micros();
+            dirty_tile_count = detectDirtyTiles(snapshot_buffer, compare_buffer);
+            t1 = micros();
+            perf_detect_us += (t1 - t0);
             
-            // Check if we need a full update (first frame, palette change, etc.)
-            bool do_full_update = force_full_update;
-            
-            if (!do_full_update && compare_buffer) {
-                // STEP 2: Detect which tiles have changed
-                // Compare snapshot (current) against compare (previous rendered)
-                dirty_tile_count = detectDirtyTiles(snapshot_buffer, compare_buffer);
-                
-                // If too many tiles are dirty, do a full update instead
-                // (reduces overhead of many small transfers)
-                int dirty_threshold = (TOTAL_TILES * DIRTY_THRESHOLD_PERCENT) / 100;
-                if (dirty_tile_count > dirty_threshold) {
-                    do_full_update = true;
-                    D(bug("[VIDEO] %d/%d tiles dirty (>%d%%), doing full update\n", 
-                          dirty_tile_count, TOTAL_TILES, DIRTY_THRESHOLD_PERCENT));
-                }
-            } else {
+            int dirty_threshold = (TOTAL_TILES * DIRTY_THRESHOLD_PERCENT) / 100;
+            if (dirty_tile_count > dirty_threshold) {
                 do_full_update = true;
             }
             
-            // STEP 3: Render (from snapshot_buffer, not mac_frame_buffer)
-            if (do_full_update) {
-                // Full update: render entire frame and push everything
-                renderFrameToDSI(snapshot_buffer);
-                pushFramebufferToDisplay();
-                
-                // Clear force_full_update flag
-                force_full_update = false;
-                
-                D(bug("[VIDEO] Full update complete\n"));
-            } else if (dirty_tile_count > 0) {
-                // Partial update: render and push only dirty tiles
-                renderAndPushDirtyTiles(snapshot_buffer, local_palette);
-                
-                // D(bug("[VIDEO] Partial update: %d/%d tiles\n", dirty_tile_count, TOTAL_TILES));
-            }
-            // else: no tiles dirty, nothing to do!
-            
-            // STEP 4: Swap buffers - snapshot becomes new compare for next frame
-            // This is a fast pointer swap, no data copying needed
             swapBuffers();
         }
         
-        // Delay to allow other tasks to run
-        // Target ~15 FPS to give more CPU time to emulation
-        vTaskDelay(pdMS_TO_TICKS(67));  // ~15Hz check rate
+        // RENDER - read directly from mac_frame_buffer (no snapshot needed with write-dirty)
+        if (do_full_update) {
+            // Full update: render entire frame and push everything
+            t0 = micros();
+            renderFrameToDSI(mac_frame_buffer);
+            t1 = micros();
+            perf_render_us += (t1 - t0);
+            
+            t0 = micros();
+            pushFramebufferToDisplay();
+            t1 = micros();
+            perf_push_us += (t1 - t0);
+            
+            // Clear force_full_update flag
+            force_full_update = false;
+            perf_full_count++;
+            
+            D(bug("[VIDEO] Full update complete\n"));
+        } else if (dirty_tile_count > 0) {
+            // Partial update: render and push only dirty tiles
+            // Read directly from mac_frame_buffer
+            t0 = micros();
+            renderAndPushDirtyTiles(mac_frame_buffer, local_palette);
+            t1 = micros();
+            perf_render_us += (t1 - t0);
+            
+            perf_partial_count++;
+        } else {
+            // No tiles dirty, nothing to do!
+            perf_skip_count++;
+        }
+        
+        perf_frame_count++;
+        last_frame_ticks = now;
+        
+        // Report performance stats periodically
+        reportVideoPerfStats();
     }
     
     Serial.println("[VIDEO] Video render task exiting");
@@ -902,12 +1255,20 @@ void VideoExit(void)
  *  Signal that a new frame is ready for display
  *  Called from CPU emulation (Core 1) to notify video task (Core 0)
  *  This is non-blocking - CPU emulation continues immediately
+ *  
+ *  Uses FreeRTOS task notification for event-driven wake-up.
+ *  The video task sleeps until notified, saving CPU cycles.
  */
 void VideoSignalFrameReady(void)
 {
-    // Simply set the flag - video task will pick it up
-    // No blocking, no waiting for display to finish
+    // Set legacy flag for compatibility
     frame_ready = true;
+    
+    // Send task notification to wake up video task immediately
+    // This is more efficient than polling - video task sleeps until notified
+    if (video_task_handle != NULL) {
+        xTaskNotifyGive(video_task_handle);
+    }
 }
 
 /*
