@@ -150,7 +150,7 @@ python3 tools/mac_control.py boot-start
 | `disk` | Existing SD disk image path (required) |
 | `cdrom` | Existing SD CD image path; `""` disables it |
 | `extfs` | Existing SD directory path; `""` disables sharing |
-| `ramsize` | `4`, `8`, `12`, or `16` MiB |
+| `ramsize` | `8`, `16`, `20`, or `24` MiB |
 | `audio`, `boot_from_cd` | `true` or `false` |
 | `rotation` | `0` or `180` degrees; hardware support as in the touch UI |
 | `wifi_ssid` | UTF-8 string, at most 32 bytes |

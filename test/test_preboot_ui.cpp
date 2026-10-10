@@ -84,7 +84,7 @@ int main()
         sv.columns[0] = {"Hard Disk:", &disks, false, 1, 0, 0, UI::kIconHardDisk};
         sv.columns[1] = {"CD-ROM:", &cds, true, 0, 0, 0, UI::kIconCD};
         sv.columns[2] = {"Shared Folder:", &folders, true, 1, 0, 0, UI::kIconFolder};
-        sv.ram_mb = 16;
+        sv.ram_mb = 24;
         sv.sound = true;
         sv.rotate180 = true;
         sv.usb_available = true;

@@ -263,7 +263,8 @@ installed that beta, no reflash is needed. Elecrow support (#10) remains separat
 You can edit `/basilisk_settings.txt` on the SD card directly to
 flip any of these without going through the GUI:
 `ramsize=16`, `boot_from_cd=yes`, `rotation=0`, `audio=no`, etc.
-Allowed RAM values are 4 / 8 / 12 / 16 MB; allowed rotations are
+Allowed RAM values are 8 / 16 / 20 / 24 MB (older 4 and 12 MB settings
+round up to 8 and 16); allowed rotations are
 `0` and `180`. The traditional desktop-Basilisk
 `~/.basilisk_ii_prefs` file format is *not* read by this port -
 all preferences live in `/basilisk_settings.txt`.
@@ -356,7 +357,7 @@ Q950) or `0x0276` (Classic) will boot. The default file path is
 This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.1 at **1.01 Macintosh Quadra 605s** overall (CPU 0.80, Graphics 1.03, Math 10.6). The emulation includes:
 
 - **CPU**: Motorola 68040 interpreter with FPU (68881), native trap dispatch and hot handlers in internal RAM
-- **RAM**: Configurable from 4MB to 16MB (allocated from ESP32-P4's 32MB PSRAM)
+- **RAM**: 8, 16, 20 or 24 MB (allocated from ESP32-P4's 32MB PSRAM); 20–24 MB leaves room for a web browser under Mac OS 8
 - **Display**: 640×360 virtual display (2× scaled to 1280×720 physical display), supporting 1/2/4/8-bit color depths at 24 FPS
 - **Storage**: Hard disk and CD-ROM images loaded from SD card
 - **Input**: Capacitive touchscreen, USB keyboard/mouse, and auto-detected official Tab5 Keyboard
@@ -446,7 +447,7 @@ pixels through an uncached view of PSRAM to limit that interference.
 ┌──────────────────────────────────────────────────────────────┐
 │                    32MB PSRAM Allocation                     │
 ├──────────────────────────────────────────────────────────────┤
-│  Mac RAM (4-16MB)          │  Configurable via Boot GUI      │
+│  Mac RAM (8-24MB)          │  Configurable via Boot GUI      │
 ├────────────────────────────┼─────────────────────────────────┤
 │  Mac ROM (~1MB)            │  Q650.ROM or compatible         │
 ├────────────────────────────┼─────────────────────────────────┤
@@ -455,10 +456,13 @@ pixels through an uncached view of PSRAM to limit that interference.
 │  Panel Frame Buffer (1.8MB)│  1280×720 RGB565, written       │
 │                            │  through the uncached alias     │
 ├────────────────────────────┼─────────────────────────────────┤
+│  Translated code (~0.7MB)  │  ROM/system code copied from    │
+│                            │  flash at startup               │
+├────────────────────────────┼─────────────────────────────────┤
 │  Opcode table (256KB)      │  cpufunctbl; PSRAM when no      │
 │  Memory-bank table (256KB) │  256KB internal block is free   │
 ├────────────────────────────┼─────────────────────────────────┤
-│  Free PSRAM                │  Varies based on RAM selection  │
+│  Free PSRAM                │  About 4MB with 24MB Mac RAM    │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -765,7 +769,7 @@ settings.
 |---------|---------|---------|
 | Hard Disk | Any `.dsk` or `.img` file on SD root | First found |
 | CD-ROM | Any `.iso` file on SD root, or None | None |
-| RAM Size | 4 MB, 8 MB, 12 MB, 16 MB | 8 MB |
+| RAM Size | 8 MB, 16 MB, 20 MB, 24 MB | 8 MB |
 | Audio | Enable / disable sound output | Enabled |
 | WiFi | SSID + password via on-screen keyboard | None |
 | Shared Folder | Any folder on the SD card — appears as a mounted volume in Mac OS | None |

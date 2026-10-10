@@ -7,7 +7,7 @@
  *  font, drawn at the emulated Mac's resolution and pixel-doubled):
  *  - Hard disk image selection
  *  - CD-ROM ISO selection
- *  - RAM size selection (4/8/12/16 MB)
+ *  - RAM size selection (8/16/20/24 MB)
  *  - WiFi network configuration
  *  - Settings persistence to SD card
  *
@@ -297,7 +297,7 @@ static bool getTouchEvent(TouchEvent* evt)
 static char selected_disk_path[BOOT_GUI_MAX_PATH] = "";
 static char selected_cdrom_path[BOOT_GUI_MAX_PATH] = "";
 static char selected_extfs_path[BOOT_GUI_MAX_PATH] = "";
-static int selected_ram_mb = 8;  // Default 8MB
+static int selected_ram_mb = kBootRamDefaultMB;
 static bool skip_gui = false;    // If true, skip boot GUI and go straight to emulator
 
 // WiFi settings storage
@@ -420,11 +420,7 @@ static void loadSettings(void)
             strncpy(selected_extfs_path, value.c_str(), BOOT_GUI_MAX_PATH - 1);
             Serial.printf("[BOOT_GUI] Loaded shared folder: %s\n", selected_extfs_path);
         } else if (key == "ramsize") {
-            selected_ram_mb = value.toInt();
-            if (selected_ram_mb != 4 && selected_ram_mb != 8 && 
-                selected_ram_mb != 12 && selected_ram_mb != 16) {
-                selected_ram_mb = 8;  // Default to 8MB if invalid
-            }
+            selected_ram_mb = BootControlSavedRam(value.toInt());
             Serial.printf("[BOOT_GUI] Loaded RAM: %d MB\n", selected_ram_mb);
         } else if (key == "skip_gui") {
             skip_gui = (value == "yes" || value == "true" || value == "1");
@@ -902,8 +898,6 @@ static void runC6FirmwareUpdateIfNeeded(void)
 // Settings Screen
 // ============================================================================
 
-static const int kRamChoices[4] = {4, 8, 12, 16};
-
 static std::vector<std::string> *mediaList(int column)
 {
     return column == 0 ? &disk_files : column == 1 ? &cdrom_files : &extfs_folders;
@@ -1004,8 +998,8 @@ static void runSettingsScreen(void)
                     inside = Screens::SettingsControlAt(L, t.x, t.y) == pressed;
                 if (t.released) {
                     if (pressed != Screens::kNoControl && inside) {
-                        if (pressed >= Screens::kRam4 && pressed <= Screens::kRam16) {
-                            selected_ram_mb = kRamChoices[pressed - Screens::kRam4];
+                        if (pressed >= Screens::kRamFirst && pressed <= Screens::kRamLast) {
+                            selected_ram_mb = kBootRamChoicesMB[pressed - Screens::kRamFirst];
                         } else if (pressed == Screens::kSoundBox) {
                             audio_enabled = !audio_enabled;
                         } else if (pressed == Screens::kBootCDBox) {
@@ -1714,7 +1708,7 @@ static String controlExecute(char *command)
         if (!SD_FS.exists(SETTINGS_FILE)) return "ERR BOOT no_saved_settings";
         selected_disk_path[0] = selected_cdrom_path[0] = selected_extfs_path[0] = 0;
         wifi_ssid[0] = wifi_password[0] = 0;
-        selected_ram_mb = 8; rotation_degrees = 180;
+        selected_ram_mb = kBootRamDefaultMB; rotation_degrees = 180;
         skip_gui = wifi_auto_connect = boot_from_cd = false; audio_enabled = true;
         loadSettings(); controlSyncSelections();
         control_wifi_changed = true;

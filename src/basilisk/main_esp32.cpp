@@ -486,9 +486,28 @@ static bool AllocateRAM(void)
     if (RAMSize < 1024 * 1024) {
         RAMSize = 8 * 1024 * 1024;  // Default 8MB
     }
-    
+
+    // The ROM, emulator tables, translated code and runtime buffers need
+    // PSRAM after guest RAM; at 24 MB about 4 MB of this stays free. If the
+    // chosen size would not leave it (another board, or fragmentation), step
+    // down instead of failing to start.
+    const uint32 kPsramAfterRAM = 6 * 1024 * 1024;
+    const uint32 kRAMStep = 4 * 1024 * 1024;
+    const uint32 requested = RAMSize;
+    const size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    const size_t psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM);
+    while (RAMSize > 8 * 1024 * 1024 &&
+           (RAMSize > psram_largest || psram_free - RAMSize < kPsramAfterRAM)) {
+        RAMSize = RAMSize > 8 * 1024 * 1024 + kRAMStep ? RAMSize - kRAMStep : 8 * 1024 * 1024;
+    }
+    if (RAMSize != requested) {
+        Serial.printf("[MAIN] WARNING: %u MB Mac RAM does not fit (PSRAM free %u, largest %u); using %u MB\n",
+                      (unsigned)(requested >> 20), (unsigned)psram_free, (unsigned)psram_largest,
+                      (unsigned)(RAMSize >> 20));
+    }
+
     Serial.printf("[MAIN] Allocating %d bytes for Mac RAM...\n", RAMSize);
-    
+
     // Allocate RAM in PSRAM
     RAMBaseHost = (uint8 *)ps_malloc(RAMSize);
     if (!RAMBaseHost) {
@@ -614,6 +633,8 @@ static bool InitEmulator(void)
     // Print memory status after init
     Serial.printf("[MAIN] Free heap after init: %d bytes\n", ESP.getFreeHeap());
     Serial.printf("[MAIN] Free PSRAM after init: %d bytes\n", ESP.getFreePsram());
+    Serial.printf("[MAIN] Largest free PSRAM block: %u bytes\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
     
     // Report internal SRAM usage after all allocations
     size_t free_internal_after = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);

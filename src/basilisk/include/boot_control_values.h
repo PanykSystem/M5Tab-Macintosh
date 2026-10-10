@@ -38,12 +38,38 @@ static inline bool BootControlBool(const char *value, bool *out)
     return false;
 }
 
+// Guest RAM sizes offered at startup, in MB. Of the 32 MB of PSRAM, the panel
+// framebuffer, ROM and emulator tables need about 4 MB, so 24 MB of guest RAM
+// still leaves several MB for runtime buffers.
+static const int kBootRamChoicesMB[] = {8, 16, 20, 24};
+static const int kBootRamChoiceCount = (int)(sizeof(kBootRamChoicesMB) / sizeof(kBootRamChoicesMB[0]));
+static const int kBootRamDefaultMB = 8;
+
+// Older firmware offered 4 and 12 MB. Round a saved size up to the next
+// choice so an existing setup never gets less memory than before.
+static inline int BootControlSavedRam(int mb)
+{
+    if (mb <= 0) return kBootRamDefaultMB;
+    for (int i = 0; i < kBootRamChoiceCount; ++i) {
+        if (mb <= kBootRamChoicesMB[i]) return kBootRamChoicesMB[i];
+    }
+    return kBootRamChoicesMB[kBootRamChoiceCount - 1];
+}
+
 static inline bool BootControlChoice(const char *value, bool ram, int *out)
 {
-    const char *choices[] = {ram ? "4" : "0", ram ? "8" : "180", "12", "16"};
-    const int numbers[] = {ram ? 4 : 0, ram ? 8 : 180, 12, 16};
-    for (int i = 0; i < (ram ? 4 : 2); ++i) {
-        if (!strcmp(value, choices[i])) { *out = numbers[i]; return true; }
+    // Plain digits only: no sign, spaces or leading zero.
+    if (!value || !*value || (value[0] == '0' && value[1])) return false;
+    int n = 0;
+    for (const char *p = value; *p; ++p) {
+        if (*p < '0' || *p > '9' || n > 1000) return false;
+        n = n * 10 + (*p - '0');
+    }
+    static const int kRotations[] = {0, 180};
+    const int *choices = ram ? kBootRamChoicesMB : kRotations;
+    const int count = ram ? kBootRamChoiceCount : 2;
+    for (int i = 0; i < count; ++i) {
+        if (n == choices[i]) { *out = n; return true; }
     }
     return false;
 }
