@@ -13,8 +13,11 @@
 // Stub definitions for JIT-related functions and variables
 static inline void compiler_init(void) {}
 static inline void compiler_exit(void) {}
-static inline void flush_icache(int n) { (void)n; }
-static inline void flush_icache_range(uint8 *start, uint32 length) { (void)start; (void)length; }
+// The guest's cache instructions (CINV, CPUSH) end up here. Translated RAM
+// code (src/basilisk/aot) checks its bytes again after a flush.
+extern void AotCodeChanged(void);
+static inline void flush_icache(int n) { (void)n; AotCodeChanged(); }
+static inline void flush_icache_range(uint8 *start, uint32 length) { (void)start; (void)length; AotCodeChanged(); }
 
 // JIT cache pointers (stubs)
 #define compiled_code NULL

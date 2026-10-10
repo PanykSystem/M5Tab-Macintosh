@@ -33,6 +33,7 @@
 
 #include <Arduino.h>
 #include "usb_msc.h"
+#include "boot_gui.h"
 #include "board_sd.h"
 #include "board_config.h"
 
@@ -213,10 +214,11 @@ extern "C" bool UsbMsc_Enter(const char **out_error_msg)
     delay(250);
     // Restore USB-A 5V output so keyboards/mice work after reboot.
     M5.Power.setExtOutput(true, m5::ext_port_mask_t::ext_USB);
-    Serial.println("[USB_MSC] USB Disk mode exited; restarting to release PHY.");
+    Serial.println("[USB_MSC] USB Disk mode exited; restarting into settings to release PHY.");
     Serial.flush();
     delay(50);
-    ESP.restart();
+    // Come back to the settings screen the user left, not straight to Mac OS.
+    BootGUI_Restart();
     // not reached
     return true;
 #else

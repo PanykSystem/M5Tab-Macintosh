@@ -1,5 +1,258 @@
 # M5Tab-Macintosh workbook
 
+## v5.1 release — 2026-10-10
+
+Austin asked to combine the Shut Down fix with the preboot work and the other
+work since 5.0.1, push it, merge it into master and release it as 5.1. He
+chose the translated code with ROM and system code only (not Speedometer's
+own code). He asked for testing, with any issues fixed, before release. He
+also chose to publish all four board images, with Waveshare and Rev3 noted as
+build-validated only. The paused JIT is not included: it remains uncommitted
+on `codex/rv32-jit` in the control checkout, with `JIT_WORKLOG.md` there.
+
+Integration branch: `claude/release-v5.1`, in session worktree
+`.claude/worktrees/jolly-hertz-2b45fc`, based on v5.0.1 `94af0b8`:
+
+| Commit | Content |
+|---|---|
+| `5871add` | Shut Down fix (section below) |
+| `bcfa164` | Preboot UI, copied from `worktrees/preboot-ui` as it stood on 2026-10-09 23:26 |
+| `5933165` | Translated code, copied from `worktrees/perf-pass-2` (final state, identical code to its `sys-22`/`full-23` builds) |
+| `af1c02f` | Speedometer runner retries the tests-complete alert (found in pre-release testing) |
+| `7af6bed` | Version 5.1, release notes, README, this section |
+| `80c2a47` | Client retries `PANEL VERIFY` when its reply is cut short (found in the hardware gate) |
+
+Those two worktrees were read, not changed; they still hold their uncommitted
+copies. Code merged without conflicts; only AUTOMATION.md and this file
+needed hand merging. The translation is the perf pass's `sys-22` generated
+file (SHA256 `7fb5dfee…95e3dc`, 537 ROM regions, 398 system modules, 680 KB).
+It is git-ignored and kept in `artifacts/release-v5.1/aot/`; a 5.1 image
+cannot be rebuilt without it.
+
+Pre-release checks on the combined code:
+
+- 58 host tests; all five profiles build, and `check_blob.py` passes on each.
+- Host differential test: 51,102 runs, 186 M instructions, 0 failures.
+  Device self-test on the Tab5: PASS, 26,866 runs, 91.8 M instructions,
+  0 failures (52 skipped by design).
+- Tab5 release candidate: 537/537 ROM regions installed. Three ratings gave
+  CPU 0.804–0.805, Graphics 1.032–1.034, Disk 1.029–1.031, Math 10.63–10.64
+  and PR 1.008–1.009. A preboot tour showed 0/921,600 panel mismatches at
+  every step. Shut Down reached the Platinum power-off alert, and the next
+  start was clean. Restart returned to the Finder. Free internal SRAM after
+  start-up is 168 KB.
+- Issues found were all in host tooling, not firmware. The Speedometer runner
+  could leave the tests-complete alert open (`af1c02f`), and the client failed
+  on a `PANEL VERIFY` reply cut short by other serial output (`80c2a47`).
+  The gate script also needed to answer Speedometer's "Save before
+  quitting?" prompt. Release images are byte-identical between `7af6bed`
+  and `80c2a47`.
+
+Hardware gate on the final debug app (`eda80f43…`, byte-identical at
+`7af6bed` and `80c2a47`): readback matched, 5.1 banner, all 537 ROM regions
+installed, Finder with settings preserved. Rating: CPU 0.804, Graphics 1.032,
+Disk 1.031, Math 10.64, PR 1.009. `PANEL VERIFY` 0/921,600. Shut Down
+reached the power-off alert (phase `stopped`), and the next start was clean
+with no crash markers. Another gate attempt on the same image rated PR 1.000
+(Disk 0.986, Math 10.40), the low end of run-to-run variation.
+
+Device state: the Tab5 runs the 5.1 debug app at the Finder, with settings
+unchanged. Its earlier application (the preboot-ui build) is backed up at
+`artifacts/shutdown-quit/hardware/app-partition-before.bin` in this worktree.
+
+Evidence (session worktree, ignored): `artifacts/release-v5.1/`, which holds
+the integration patches, builds, test logs, device runs, the gate's
+`hardware/health.json`, and `release-status.json` with the publication
+outcome. The three sections below record how each part was developed; their
+branch, device-state and next-step statements are historical.
+
+## Shut Down panic fix — 2026-10-09
+
+Austin reported that Special > Shut Down on v5.0.1 (and `claude/preboot-ui`)
+printed `QuitEmulator called`, then panicked with a NULL load in
+`m68k_do_execute()`. The device rebooted into recovery settings, so the
+"safe to switch off" screen never appeared. The work is on branch
+`claude/jolly-hertz-2b45fc` (session worktree
+`.claude/worktrees/jolly-hertz-2b45fc`), based on v5.0.1 `94af0b8`.
+
+Cause: upstream `QuitEmulator()` exits the process. This port's version only
+cleared `emulator_running`, which the CPU never reads, so execution continued
+after the EMUL_OP. PowerOff (Q650 ROM+0x9E16) is patched by overwriting only
+the first word of `BSR.W` with `EMUL_OP_SHUTDOWN`. The CPU therefore decoded
+the displacement word and then `JMP (-8,PC,A0.L)` into unmapped memory, where
+the dummy bank returns a NULL `pc_p`. The panic registers held fragments of
+`default_xlate()`'s message. The bug has been present since at least v3.4.2
+and is not a 5.0.1 regression. Polling once per 8 instructions only means that
+setting BRK alone would also stop the CPU too late.
+
+Fix: `QuitEmulator()` calls `m68k_request_quit()`, which sets a sticky request
+and BRK. `m68k_emulop()` then parks the PC on two host-side `EXEC_RETURN`
+opcodes, so the rest of the dispatch batch does nothing. `m68k_do_specialties()`
+returns before any trace, interrupt or STOP handling, and `m68k_execute()`
+returns at every nesting level. The inner dispatch loop and the opcode handlers
+are unchanged.
+
+Tab5 verification (debug app, flashed app-only at 0x10000 with a matching
+readback):
+
+- Shut Down: the CPU stopped in the same millisecond as the quit, and teardown
+  took 0.2 s. Boot status reported `stopped`, and no panic occurred within
+  45 s. A protocol-5 panel readback (fix plus the preboot-ui automation patch)
+  showed "It is now safe to switch off your Macintosh."
+- The next boot reached Finder with no improper-shutdown alert.
+- Restart showed Welcome, then Starting Up, then Finder, without calling
+  `QuitEmulator`.
+- Speedometer Performance Rating, 3 runs each:
+
+| | CPU | Graphics | Disk | Math | PR |
+|---|---:|---:|---:|---:|---:|
+| v5.0.1 release debug app | 0.804 | 0.495–0.496 | 0.997–1.031 | 9.435–9.478 | 0.762–0.765 |
+| Fix | 0.803 | 0.495–0.497 | 1.030–1.034 | 9.412–9.419 | 0.764–0.766 |
+
+The Performance Rating did not regress. CPU (one display unit) and Math
+(about 0.3%) are slightly lower, although no hot path changed. The only new
+work is one flag test per EMUL_OP and per specialty call.
+
+Evidence is in this worktree's ignored `artifacts/shutdown-quit/` (test
+driver, images, serial logs, screenshots, ratings). The Tab5 runs the final
+debug app `705c8a5e…`, whose code sections are identical to the tested
+`bd7a5c2d…`; only `__TIME__` strings differ. The previous application (the
+preboot-ui protocol-5 build) is backed up as
+`artifacts/shutdown-quit/hardware/app-partition-before.bin` (SHA256
+`5a862ad0…`). Next: Austin's review. Pushing, opening a PR and releasing all
+need his approval. `claude/preboot-ui` needs this fix before its own Shut Down
+test.
+
+## Preboot UI redesign and diagnostic screenshots — 2026-10-09
+
+Austin reported the preboot UI had "gotten all wonky" and asked for a Mac OS 8
+look (Charcoal font, pixel-doubled like the Mac screen) plus diagnostic
+screenshots of the preboot environment. Work is on branch `claude/preboot-ui`
+(`worktrees/preboot-ui`, based on master `94af0b8`), uncommitted. The control
+checkout's paused JIT work is untouched.
+
+Root cause of the regression: `scripts/build_assets.py` needed Pillow for the
+Chicago TTF and PNG artwork, PlatformIO's Python has no Pillow, and the
+fallback was silent. Builds from fresh worktrees therefore shipped the 5x7
+debug font and a placeholder Happy Mac: the published v5.0.1 images and the
+AOT image that was on the Tab5 both contain it. The old UI also drew 1-pixel
+lines at native panel resolution (not doubled) and left a stipple stripe
+through the settings window.
+
+Changes:
+
+- `preboot_ui.cpp` draws on a 640x360 (Waveshare 640x400) indexed canvas and
+  presents changed areas through the emulator's own 2x indexed tile path.
+  Platinum chrome, buttons, checkboxes, radios and scroll bars were measured
+  pixel by pixel from Mac OS 8.1 running in the emulator. Icons and the desktop
+  speckle are original.
+- `assets/fonts/charcoal12.bdf` is a Charcoal 12 recreation traced from guest
+  rendering; it reproduces the guest's text with 0 differing pixels. It
+  replaces Chicago everywhere, including the emulator's touch keyboard overlay.
+  `chicago_font.*` and `pixChicago.ttf` are removed.
+- `build_assets.py` is standard-library only (own PNG decoder, verified
+  identical to Pillow). It regenerates every header deterministically each
+  build, and a present-but-undecodable asset fails the build. Also fixes a
+  latent `_parse_bdf` bug that kept only the last glyph.
+- `preboot_screens.cpp` holds pure layouts (settings, Wi-Fi, password
+  keyboard, alerts, splash) shared by painting, hit testing and host tests.
+  Behavior changes: lists scroll (arrows auto-repeat, track pages); one row per
+  Wi-Fi name (strongest access point); the keyboard adds `- _ , . / ; : ' " = +`;
+  Cancel discards typed text; the Tab5 USB Disk "Done" restart now returns to
+  settings, as the alert says.
+- Protocol 5 (`AUTOMATION.md#preboot-screenshots-and-touch`): screenshots and
+  `PANEL VERIFY` before the emulator starts, `SCREENSHOT PANEL` (1280x720
+  readback, any phase, ~1.5 s), `TOUCH`, `BOOT HIT`. The tour tool
+  `tools/preboot_screenshots.py` captures every screen with verification.
+
+Verification: 55 host tests pass, including native renders of every screen on
+both boards and rotations with an exact 2x panel check. All five profiles
+build. On the Tab5 (final debug app SHA256
+`2f725a84d8793a812a23cabf85b1bf0164bdfd84d0706d8da5eb2d9ecf5bd96f`, readback
+match), the full tour (settings, pressed button, list and radio edits, Wi-Fi
+scan, keyboard typing, reload, USB Disk and its restart) had 0/921,600 panel
+mismatches at every step. Start Up reached Finder, emulator `PANEL VERIFY`
+0 mismatches, and the saved settings equal the session baseline. Evidence:
+control checkout `artifacts/preboot-ui/` (`before/`, `final/tour/`,
+`final/boot-check.json`, build and test logs).
+
+Not verified: physical finger touches (all input was injected through the touch
+task), Waveshare hardware, the error alert on hardware. Found but not fixed
+(pre-existing on master): Mac OS Special > Shut Down panics in
+`m68k_do_execute` after `QuitEmulator`, so "safe to switch off" never shows.
+
+Device state: the Tab5 runs the final debug build above, on the Startup
+Settings screen, settings unchanged. Its previous application (the AOT
+`full-23` performance image, 5.0.1) is backed up as
+`artifacts/preboot-ui/hardware/app-partition-before.bin` (SHA256
+`05fe438e…bd18a2`); restore with an app-only write at 0x10000.
+
+Next: Austin reviews the screens on the device; commit/PR on his approval;
+rebuild release images so they carry the real font.
+
+## Translated code pass — 2026-09-27/28
+
+Austin asked for every Speedometer 4.02 Performance Rating score near or
+above 1.0, without a JIT, and authorized flashing the attached Tab5. Work is
+on branch `claude/perf-pass-2` (`worktrees/perf-pass-2`), based on v5.0.1
+`94af0b8`. It is uncommitted, not pushed, and nothing was released. The
+control checkout's paused JIT work on `codex/rv32-jit` was not touched; its
+uncommitted edits to this file and to PERF_WORKLOG.md are not in this branch
+and have to be merged by whoever integrates.
+
+| | CPU | Graphics | Disk | Math | PR |
+|---|---:|---:|---:|---:|---:|
+| v5.0.1 | 0.804 | 0.490–0.494 | 1.031 | 9.42 | 0.764 |
+| ROM and system code translated | 0.804 | 1.023–1.025 | 1.027–1.028 | 10.48 | 1.006 |
+| Also Speedometer's own code | 1.603–1.604 | 1.012–1.014 | 1.024–1.030 | 11.11–11.12 | 1.334–1.335 |
+
+Hot 68k code is translated to C++ at build time from the interpreter's own
+handler bodies and entered through patched opcodes; nothing is generated at
+run time. ROM regions are checked against the ROM at start-up. System and
+application code in RAM is translated as position-independent modules,
+installed where it is seen running and checked again after every guest cache
+flush. The translated code runs from PSRAM. Design and rules:
+[EMULATOR_PERFORMANCE.md](EMULATOR_PERFORMANCE.md#translated-code).
+Measurements and rejected experiments:
+[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md). Procedure:
+[tools/aot/README.md](tools/aot/README.md).
+
+The CPU test is a sort loop in Speedometer itself. It moves only when that
+loop is in the profile, so the middle row is what an unprofiled program
+gets.
+
+Verification: 55 host tests. Every translation passed the differential
+self-test on the host and, built by the firmware toolchain, on the Tab5
+(for the flashed image: 27,526 runs, 92.1 million instructions compared, no
+mismatch, 57 trials skipped because they overwrote the code under test).
+`PANEL VERIFY` 0/921,600 after every set of runs. Cold boot to Finder 49.6 s
+(5.0.1: 49.5 s). Color QuickDraw monochrome 1.001, 8-bit 0.868 (5.0.1: 0.549
+and 0.509).
+
+Device state: the Tab5 runs the last row's image, `full-23`
+(`artifacts/perf-pass-2/builds/full-23.bin`, debug profile, SHA-256
+`2feab40d3f4168d72d9be071e8a0866f3abeec5d4a9cd9e16edafd01b07c0978`).
+Only the application at 0x10000 was
+written; bootloader, partition table, NVS, settings and the SD image were
+not. To go back, flash
+`artifacts/release-v5.0.1/debug-components/firmware.bin` at 0x10000.
+
+Open points for Austin:
+
+- `src/basilisk/aot/aot_rom_generated.cpp` is a translation of Apple's ROM
+  and system software. It is git-ignored. Firmware built with it contains
+  that translation; decide before publishing such a build.
+- Whether the shipped profile should include Speedometer's own code.
+- Waveshare and Rev3 hardware have not run this; their profiles build and
+  pass `check_blob.py`. The Tab5 release profile (`esp32p4_pioarduino`) was
+  built but not flashed: every measurement is of the debug profile.
+- The repository's ESP-IDF project files (`CMakeLists.txt`, `main/`) list
+  sources that no longer exist. They stopped an attempt to rebuild the SDK
+  and are otherwise unused.
+
+Evidence, every flashed image with its ELF and patch, profiles and scripts:
+control checkout, `artifacts/perf-pass-2/` (`NOTES.md` is the index).
+
 ## v5.0.1 Performance release — 2026-09-27
 
 Austin asked to raise Speedometer 4.02 Performance Rating CPU and Graphics

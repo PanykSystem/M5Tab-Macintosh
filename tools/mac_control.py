@@ -548,8 +548,64 @@ class MacControl:
     def screenshot_color_png(
         self, timeout: float = 90.0
     ) -> tuple[bytes, int, int]:
-        """Capture the full indexed-color framebuffer over integrity-checked USB."""
+        """Capture the full indexed-color framebuffer over integrity-checked USB.
+
+        Before the emulator starts this is the preboot settings screen, at the
+        same logical resolution as the Mac screen."""
         return self._screenshot_png_once(timeout, monochrome=False)
+
+    def screenshot_panel_png(self, timeout: float = 180.0) -> tuple[bytes, int, int]:
+        """Read back the physical panel at full resolution, in any boot phase.
+
+        Unlike the logical captures this shows exactly what the display
+        controller scans out, so it reveals pixels that are not doubled."""
+        return self._screenshot_png_once(timeout, monochrome=False, panel=True)
+
+    def panel_verify(self) -> dict[str, Any]:
+        """Compare the panel with the frame it should show (guest or preboot)."""
+        # Diagnostic output from another firmware task can cut into the reply
+        # line; the check is read-only, so ask again.
+        for attempt in range(3):
+            line = self.request("PANEL VERIFY", "OK PANEL", timeout=30.0)
+            fields = dict(part.split("=", 1) for part in line.split()[3:] if "=" in part)
+            try:
+                first_x, first_y = (int(v) for v in fields["first"].split(","))
+                return {"checked": int(fields["checked"]), "mismatched": int(fields["mismatched"]),
+                        "first": [first_x, first_y]}
+            except (KeyError, ValueError) as exc:
+                error = exc
+        raise ControlError("invalid PANEL VERIFY response") from error
+
+    def touch(self, action: str, x: int | None = None, y: int | None = None,
+              hold_ms: int | None = None) -> None:
+        """Touch the preboot screens at screenshot coordinates (tap/down/move/up)."""
+        action = action.lower()
+        if action == "up":
+            self.request("TOUCH UP", "OK TOUCH UP", timeout=5.0)
+            return
+        if action not in ("tap", "down", "move") or x is None or y is None:
+            raise ControlError("touch needs tap, down or move with x and y, or up")
+        command = f"TOUCH {action.upper()} {int(x)} {int(y)}"
+        if action == "tap" and hold_ms is not None:
+            command += f" {int(hold_ms)}"
+        self.request(command, f"OK TOUCH {action.upper()}", timeout=10.0)
+
+    def boot_hit(self, name: str) -> dict[str, Any]:
+        """Locate a named control on the current preboot screen."""
+        if not name or any(ch.isspace() for ch in name):
+            raise ControlError("control names have no spaces")
+        fields = self._boot_request(f"HIT {name}", f"HIT {name}").split()
+        try:
+            x, y, w, h = (int(v) for v in fields[-4:])
+        except ValueError as exc:
+            raise ControlError("invalid BOOT HIT response") from exc
+        return {"x": x, "y": y, "w": w, "h": h, "center": [x + w // 2, y + h // 2]}
+
+    def tap_control(self, name: str) -> dict[str, Any]:
+        """Tap the center of a named preboot control."""
+        rect = self.boot_hit(name)
+        self.touch("tap", *rect["center"])
+        return rect
 
     def _get_http_url(self) -> str | None:
         if isinstance(getattr(self, "_http_url", None), str):
@@ -591,10 +647,10 @@ class MacControl:
         )
 
     def _screenshot_png_once(
-        self, timeout: float, monochrome: bool = True
+        self, timeout: float, monochrome: bool = True, panel: bool = False
     ) -> tuple[bytes, int, int]:
         try:
-            return self._screenshot_png_transfer(timeout, monochrome)
+            return self._screenshot_png_transfer(timeout, monochrome, panel)
         except (ControlError, OSError):
             if getattr(self, "protocol_version", 3) >= 4:
                 try:
@@ -604,7 +660,7 @@ class MacControl:
             raise
 
     def _screenshot_png_transfer(
-        self, timeout: float, monochrome: bool = True
+        self, timeout: float, monochrome: bool = True, panel: bool = False
     ) -> tuple[bytes, int, int]:
         # A prior timed-out transfer can leave a valid-looking frame header in
         # the OS tty buffer after the firmware has released that frame. Never
@@ -626,10 +682,12 @@ class MacControl:
             nonce_value = (getattr(self, "_screenshot_nonce", time.monotonic_ns()) + 1) & 0xFFFF
             self._screenshot_nonce = nonce_value
             nonce = f"{nonce_value:04X}"
-            command = f"SCREENSHOT MONO {nonce}" if monochrome else f"SCREENSHOT {nonce}"
+            command = (f"SCREENSHOT MONO {nonce}" if monochrome
+                       else f"SCREENSHOT PANEL {nonce}" if panel else f"SCREENSHOT {nonce}")
             response_kind = "M2" if monochrome else "F2"
             self._write(command)
-            attempt_deadline = min(deadline, time.monotonic() + 1.0)
+            # Full-resolution panel reads take longer to capture and compress.
+            attempt_deadline = min(deadline, time.monotonic() + (4.0 if panel else 1.0))
             for line in self._protocol_lines(attempt_deadline):
                 if line.startswith(f"{PROTOCOL_PREFIX}ERR"):
                     raise ControlError(line[len(PROTOCOL_PREFIX) :])
@@ -1022,7 +1080,12 @@ MCP_TOOLS = [
     },
     {
         "name": "mac_screenshot_color",
-        "description": "Capture the full-color emulated Mac screen as PNG (slower).",
+        "description": "Capture the full-color emulated Mac screen as PNG (slower). Before the emulator starts this shows the preboot settings screen.",
+        "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+    {
+        "name": "mac_screenshot_panel",
+        "description": "Read back the physical display panel at full resolution as PNG, in any boot phase (slowest; for display diagnostics).",
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
@@ -1110,6 +1173,12 @@ MCP_TOOLS += [
      "inputSchema": {"type": "object", "properties": {"key": {"type": "string", "enum": list(BOOT_WRITE_SETTINGS)}, "value": {"type": ["string", "boolean", "integer"]}}, "required": ["key", "value"], "additionalProperties": False}},
     {"name": "mac_boot_list", "description": "List SD disk images, CD images, or shared folders in preboot.",
      "inputSchema": {"type": "object", "properties": {"kind": {"type": "string", "enum": ["disk", "cdrom", "extfs"]}}, "required": ["kind"], "additionalProperties": False}},
+    {"name": "mac_touch", "description": "Touch the preboot screens (before the emulator starts) at screenshot coordinates: tap, down, move, or up.",
+     "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["tap", "down", "move", "up"]}, "x": {"type": "integer"}, "y": {"type": "integer"}, "hold_ms": {"type": "integer", "minimum": 0, "maximum": 5000}}, "required": ["action"], "additionalProperties": False}},
+    {"name": "mac_boot_hit", "description": "Locate a named control on the current preboot screen (settings: disk, cdrom, extfs, ram4..ram16, sound, bootcd, rotate, wifi, usb, start; wifi: networks, password, scan, back, join; keyboard: key:<c>, shift, delete, space, ok, cancel; usb: done).",
+     "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"], "additionalProperties": False}},
+    {"name": "mac_panel_verify", "description": "Check that the physical panel matches the frame it should show, pixel-doubled (guest Mac or preboot screen).",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "mac_boot_action", "description": "Enter reboots the device once into preboot settings; start saves and boots. Save persists, reload discards unsaved edits, rescan refreshes media; wifi-connect/disconnect operate on current credentials. Enter restarts the guest; shut it down first when a clean guest filesystem is needed.",
      "inputSchema": {"type": "object", "properties": {"action": {"type": "string", "enum": ["enter", "start", "save", "reload", "rescan", "wifi-connect", "wifi-disconnect"]}}, "required": ["action"], "additionalProperties": False}},
 ]
@@ -1138,6 +1207,20 @@ def call_mcp_tool(control: MacControl, name: str, arguments: dict[str, Any]) -> 
             {"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"},
             {"type": "text", "text": f"Captured full-color Mac screen ({width}x{height})."},
         ]
+    if name == "mac_screenshot_panel":
+        png, width, height = control.screenshot_panel_png()
+        return [
+            {"type": "image", "data": base64.b64encode(png).decode("ascii"), "mimeType": "image/png"},
+            {"type": "text", "text": f"Captured the physical panel ({width}x{height})."},
+        ]
+    if name == "mac_touch":
+        control.touch(str(arguments["action"]), arguments.get("x"), arguments.get("y"),
+                      arguments.get("hold_ms"))
+        return [{"type": "text", "text": "OK"}]
+    if name == "mac_boot_hit":
+        return [{"type": "text", "text": json.dumps(control.boot_hit(str(arguments["name"])))}]
+    if name == "mac_panel_verify":
+        return [{"type": "text", "text": json.dumps(control.panel_verify())}]
     if name == "mac_move":
         control.move(int(arguments["x"]), int(arguments["y"]))
     elif name == "mac_click":
@@ -1231,11 +1314,23 @@ def build_parser() -> argparse.ArgumentParser:
     media.add_argument("kind", choices=("disk", "cdrom", "extfs"))
     for action in ("enter", "start", "save", "reload", "rescan", "wifi-connect", "wifi-disconnect"):
         subparsers.add_parser(f"boot-{action}")
-    screenshot = subparsers.add_parser("screenshot")
+    screenshot = subparsers.add_parser(
+        "screenshot", help="capture the Mac screen, or the preboot screen before the emulator starts")
     screenshot.add_argument("output", type=Path)
     screenshot.add_argument(
         "--color", action="store_true", help="capture the slower full-color framebuffer"
     )
+    screenshot.add_argument(
+        "--panel", action="store_true",
+        help="read back the physical panel at full resolution (any boot phase)")
+    touch = subparsers.add_parser("touch", help="touch the preboot screens at screenshot coordinates")
+    touch.add_argument("action", choices=("tap", "down", "move", "up"))
+    touch.add_argument("x", type=int, nargs="?")
+    touch.add_argument("y", type=int, nargs="?")
+    touch.add_argument("--hold", type=int, help="tap duration in milliseconds")
+    hit = subparsers.add_parser("boot-hit", help="locate a named control on the current preboot screen")
+    hit.add_argument("name")
+    subparsers.add_parser("panel-verify", help="check the panel against the frame it should show")
     move = subparsers.add_parser("move")
     move.add_argument("x", type=int)
     move.add_argument("y", type=int)
@@ -1271,6 +1366,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command.startswith("boot-"):
                 action = args.command[5:]
                 if action == "status": result = control.boot_status()
+                elif action == "hit": result = control.boot_hit(args.name)
                 elif action == "get": result = control.boot_get(args.key)
                 elif action == "set": result = control.boot_set(args.key, args.value)
                 elif action == "list": result = control.boot_list(args.kind)
@@ -1281,10 +1377,16 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "info":
                 print(control.info())
             elif args.command == "screenshot":
-                capture = control.screenshot_color_png if args.color else control.screenshot_png
+                capture = (control.screenshot_panel_png if args.panel
+                           else control.screenshot_color_png if args.color
+                           else control.screenshot_png)
                 png, width, height = capture()
                 args.output.write_bytes(png)
                 print(f"wrote {args.output} ({width}x{height})")
+            elif args.command == "touch":
+                control.touch(args.action, args.x, args.y, args.hold)
+            elif args.command == "panel-verify":
+                print(json.dumps(control.panel_verify(), indent=2))
             elif args.command == "move":
                 control.move(args.x, args.y)
             elif args.command == "move-relative":

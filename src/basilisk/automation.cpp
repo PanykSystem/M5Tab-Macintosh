@@ -12,18 +12,26 @@
  *   @B2 KEY DOWN|UP|TAP <ADB keycode>
  *   @B2 TYPE <base64-encoded US-ASCII>
  *   @B2 RELEASE_ALL
+ *   @B2 SCREENSHOT PANEL <token>          full-resolution panel readback
+ *   @B2 TOUCH TAP|DOWN|MOVE <x> <y> | UP  preboot touch, screenshot coordinates
  *
  * Replies are also prefixed with "@B2 ". Small input commands stay on serial.
  * Protocol 4 adds boot-scoped request/reply IDs and cached acknowledgements.
  * Screenshots use CRC-checked serial block reads; HTTP remains a fallback.
+ * Protocol 5 serves screenshots, PANEL VERIFY and TOUCH before the emulator
+ * starts (the preboot settings screens) and adds panel readback anytime.
  */
 
 #include "sysdeps.h"
 #include "automation.h"
 #include "boot_gui.h"
 #include "input.h"
+#include "board_display.h"
+#include "preboot_ui.h"
 #include "quickdraw_accel.h"
 #include "perf_sampler.h"
+#include "aot/aot_profile.h"
+#include "aot/aot_runtime.h"
 #include "video.h"
 
 #include "board_config.h"
@@ -45,7 +53,7 @@ extern void CPUTrapProfileReset(void);
 extern uint32 CPUTrapProfileRead(uint16 trap_index);
 extern uint32 CPUTrapProfileReadLayer(uint8 selector);
 
-#define AUTOMATION_PROTOCOL_VERSION 4
+#define AUTOMATION_PROTOCOL_VERSION 5
 #define AUTOMATION_TASK_STACK_SIZE 8192
 #define AUTOMATION_TASK_PRIORITY 3
 #define AUTOMATION_TASK_CORE 0
@@ -389,11 +397,39 @@ static void releaseScreenshot(void)
     s_screenshot_crc = 0;
 }
 
-static bool captureScreenshot(bool announce)
+/* What a screenshot shows: the guest Mac, the preboot screens (both at the
+ * Mac's resolution), or the physical panel at full resolution. */
+enum CaptureSource { kCaptureGuest, kCapturePreboot, kCapturePanel };
+
+static size_t captureCapacity(CaptureSource source)
+{
+    return source == kCapturePanel
+        ? (size_t)BOARD_DISPLAY_WIDTH * BOARD_DISPLAY_HEIGHT
+        : (size_t)BOARD_MAC_SCREEN_WIDTH * BOARD_MAC_SCREEN_HEIGHT;
+}
+
+static bool captureFrame(CaptureSource source, uint8_t *pixels, size_t capacity,
+                         uint16_t *palette, uint16_t *width, uint16_t *height)
+{
+    switch (source) {
+    case kCaptureGuest:
+        return VideoCaptureFrame(pixels, capacity, palette, width, height);
+    case kCapturePreboot:
+        // The canvas holds exactly what was last presented; without one
+        // (handoff to the emulator) sample the panel at the same scale.
+        return PrebootUI::CaptureFrame(pixels, capacity, palette, width, height) ||
+               BoardDisplay_CapturePanel(pixels, capacity, palette, width, height,
+                                         BOARD_DISPLAY_WIDTH / BOARD_MAC_SCREEN_WIDTH);
+    case kCapturePanel:
+        return BoardDisplay_CapturePanel(pixels, capacity, palette, width, height, 1);
+    }
+    return false;
+}
+
+static bool captureScreenshot(bool announce, CaptureSource source)
 {
     releaseScreenshot();
-    const size_t pixel_capacity =
-        (size_t)BOARD_MAC_SCREEN_WIDTH * BOARD_MAC_SCREEN_HEIGHT;
+    const size_t pixel_capacity = captureCapacity(source);
     uint8_t *pixels = (uint8_t *)ps_malloc(pixel_capacity);
     const size_t compressed_capacity =
         pixel_capacity + (pixel_capacity + 126) / 127 + 16;
@@ -413,7 +449,7 @@ static bool captureScreenshot(bool announce)
     uint16_t palette[256];
     uint16_t width = 0;
     uint16_t height = 0;
-    if (!VideoCaptureFrame(pixels, pixel_capacity, palette, &width, &height)) {
+    if (!captureFrame(source, pixels, pixel_capacity, palette, &width, &height)) {
         heap_caps_free(hash_table);
         free(compressed);
         free(pixels);
@@ -476,11 +512,10 @@ static bool captureScreenshot(bool announce)
     return true;
 }
 
-static bool captureMonochromeScreenshot(void)
+static bool captureMonochromeScreenshot(CaptureSource source)
 {
     releaseScreenshot();
-    const size_t pixel_capacity =
-        (size_t)BOARD_MAC_SCREEN_WIDTH * BOARD_MAC_SCREEN_HEIGHT;
+    const size_t pixel_capacity = captureCapacity(source);
     uint8_t *pixels = (uint8_t *)ps_malloc(pixel_capacity);
     if (pixels == NULL) {
         protocolReply("@B2 ERR SCREENSHOT out_of_memory\n");
@@ -490,7 +525,7 @@ static bool captureMonochromeScreenshot(void)
     uint16_t palette[256];
     uint16_t width = 0;
     uint16_t height = 0;
-    if (!VideoCaptureFrame(pixels, pixel_capacity, palette, &width, &height)) {
+    if (!captureFrame(source, pixels, pixel_capacity, palette, &width, &height)) {
         free(pixels);
         protocolReply("@B2 ERR SCREENSHOT frame_unavailable\n");
         return false;
@@ -687,7 +722,7 @@ static void pollAutomationHttp(void)
         return;
     }
 
-    if (!captureScreenshot(false)) {
+    if (!captureScreenshot(false, kCaptureGuest)) {
         client.print("HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n"
                      "Connection: close\r\n\r\n");
         client.stop();
@@ -770,6 +805,55 @@ static bool parseKeyCode(const char *text, uint8_t *code)
     return true;
 }
 
+/* TOUCH TAP|DOWN|MOVE <x> <y> [hold_ms] and TOUCH UP, in screenshot
+ * coordinates, stand in for a finger on the preboot screens. */
+static void processTouchCommand(const char *args)
+{
+    if (s_emulator_ready) {
+        protocolReply("@B2 ERR TOUCH emulator_running\n");
+        return;
+    }
+    const int scale = BOARD_DISPLAY_WIDTH / BOARD_MAC_SCREEN_WIDTH;
+    const int max_x = BOARD_DISPLAY_WIDTH / scale, max_y = BOARD_DISPLAY_HEIGHT / scale;
+    char verb[8] = {};
+    int x = 0, y = 0;
+    unsigned hold = 80;
+    const int fields = sscanf(args, "%7s %d %d %u", verb, &x, &y, &hold);
+    const bool up = fields == 1 && strcmp(verb, "UP") == 0;
+    const bool positioned = fields >= 3 && (!strcmp(verb, "TAP") || !strcmp(verb, "DOWN") ||
+                                            !strcmp(verb, "MOVE"));
+    if (!up && !positioned) {
+        protocolReply("@B2 ERR TOUCH invalid\n");
+        return;
+    }
+    if (positioned && (x < 0 || y < 0 || x >= max_x || y >= max_y || hold > 5000)) {
+        protocolReply("@B2 ERR TOUCH out_of_range\n");
+        return;
+    }
+    // Aim at the middle of the logical pixel's block on the panel.
+    const int px = x * scale + scale / 2, py = y * scale + scale / 2;
+    if (up) {
+        BootGUI_InjectTouch(px, py, false);
+        vTaskDelay(pdMS_TO_TICKS(60));     // let the 60 Hz touch task see it
+        BootGUI_EndInjectedTouch();
+        protocolReply("@B2 OK TOUCH UP\n");
+        return;
+    }
+    if (!BootGUI_InjectTouch(px, py, true)) {
+        protocolReply("@B2 ERR TOUCH unavailable\n");
+        return;
+    }
+    if (!strcmp(verb, "TAP")) {
+        vTaskDelay(pdMS_TO_TICKS(hold < 40 ? 40 : hold));
+        BootGUI_InjectTouch(px, py, false);
+        vTaskDelay(pdMS_TO_TICKS(60));
+        BootGUI_EndInjectedTouch();
+    } else {
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+    protocolReply("@B2 OK TOUCH %s %d %d\n", verb, x, y);
+}
+
 static void processLegacyCommand(char *command)
 {
     if (strcmp(command, "PING") == 0) {
@@ -811,17 +895,23 @@ static void processLegacyCommand(char *command)
                       url[0] != '\0' ? 1 : 0);
         return;
     }
-    if (!s_emulator_ready) {
-        protocolReply("@B2 ERR emulator_not_ready\n");
+    if (strncmp(command, "TOUCH ", 6) == 0) {
+        processTouchCommand(command + 6);
         return;
     }
+    // Screenshots work in every phase: the guest once the emulator runs,
+    // otherwise the preboot screens; PANEL reads the physical panel.
     bool tokenized_screenshot = false;
     bool monochrome_screenshot = false;
+    CaptureSource capture_source = s_emulator_ready ? kCaptureGuest : kCapturePreboot;
     unsigned long screenshot_request_token = 0;
     const char *screenshot_token_text = NULL;
     if (strncmp(command, "SCREENSHOT MONO ", 16) == 0) {
         screenshot_token_text = command + 16;
         monochrome_screenshot = true;
+    } else if (strncmp(command, "SCREENSHOT PANEL ", 17) == 0) {
+        screenshot_token_text = command + 17;
+        capture_source = kCapturePanel;
     } else if (strncmp(command, "SCREENSHOT ", 11) == 0) {
         screenshot_token_text = command + 11;
     }
@@ -847,8 +937,8 @@ static void processLegacyCommand(char *command)
         s_serial_capture_busy = true;
         vTaskDelay(pdMS_TO_TICKS(120));
         const bool captured = monochrome_screenshot
-                                  ? captureMonochromeScreenshot()
-                                  : captureScreenshot(!tokenized_screenshot);
+                                  ? captureMonochromeScreenshot(capture_source)
+                                  : captureScreenshot(!tokenized_screenshot, capture_source);
         s_serial_capture_busy = false;
         if (!captured) {
             s_serial_screenshot_locked = false;
@@ -962,6 +1052,22 @@ static void processLegacyCommand(char *command)
         }
         return;
     }
+    if (!s_emulator_ready) {
+        if (strcmp(command, "PANEL VERIFY") == 0) {
+            // Preboot: the panel must hold the presented canvas, pixel-doubled.
+            uint32_t checked = 0, mismatched = 0;
+            int first_x = -1, first_y = -1;
+            if (!PrebootUI::VerifyPanel(&checked, &mismatched, &first_x, &first_y)) {
+                protocolReply("@B2 ERR PANEL unavailable\n");
+            } else {
+                protocolReply("@B2 OK PANEL checked=%lu mismatched=%lu first=%d,%d\n",
+                              (unsigned long)checked, (unsigned long)mismatched, first_x, first_y);
+            }
+            return;
+        }
+        protocolReply("@B2 ERR emulator_not_ready\n");
+        return;
+    }
     if (strcmp(command, "RELEASE_ALL") == 0) {
         InputAutomationReleaseAll();
         protocolReply("@B2 OK RELEASE_ALL\n");
@@ -1028,6 +1134,113 @@ static void processLegacyCommand(char *command)
             response[used++] = hex[bytes[i] & 0x0f];
         }
         response[used] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (strcmp(command, "AOT STATS") == 0) {
+        extern uint64_t EmulatorInstructionCount(void);
+        AotStats stats;
+        AotReadStats(&stats);
+        protocolReply("@B2 OK AOT STATS regions=%lu/%lu entries=%lu/%lu modules=%lu/%lu installs=%lu "
+                      "checks=%lu rejects=%lu flushes=%lu code=%lu psram=%lu calls=%llu instructions=%llu "
+                      "total=%llu\n",
+                      (unsigned long)stats.regions_installed, (unsigned long)stats.regions_total,
+                      (unsigned long)stats.entries_installed, (unsigned long)stats.entries_total,
+                      (unsigned long)stats.modules_installed, (unsigned long)stats.modules_total,
+                      (unsigned long)stats.module_installs, (unsigned long)stats.module_checks,
+                      (unsigned long)stats.module_rejects, (unsigned long)stats.flushes,
+                      (unsigned long)stats.code_bytes, (unsigned long)stats.code_in_psram,
+                      (unsigned long long)stats.calls, (unsigned long long)stats.instructions,
+                      (unsigned long long)EmulatorInstructionCount());
+        return;
+    }
+    if (strcmp(command, "AOTPROF START") == 0) {
+        if (AotProfileStart()) {
+            protocolReply("@B2 OK AOTPROF START chunks=%lu\n", (unsigned long)AotProfileChunks());
+        } else {
+            protocolReply("@B2 ERR AOTPROF unavailable\n");
+        }
+        return;
+    }
+    if (strcmp(command, "AOTPROF STOP") == 0) {
+        AotProfileStop();
+        protocolReply("@B2 OK AOTPROF STOP chunks=%lu\n", (unsigned long)AotProfileChunks());
+        return;
+    }
+    unsigned long profile_chunk = 0;
+    if (sscanf(command, "AOTPROF MAP %lu", &profile_chunk) == 1) {
+        // Which chunks of counters hold anything, 1024 chunks a reply.
+        static const char hex[] = "0123456789ABCDEF";
+        uint8_t bitmap[128];
+        const uint32_t used = AotProfileMap((uint32_t)profile_chunk, bitmap, sizeof(bitmap));
+        char response[320];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF MAP %lu ", profile_chunk);
+        for (uint32_t i = 0; i < used; ++i) {
+            response[length++] = hex[bitmap[i] >> 4];
+            response[length++] = hex[bitmap[i] & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (sscanf(command, "AOTPROF READ %lu", &profile_chunk) == 1) {
+        static const char hex[] = "0123456789ABCDEF";
+        uint32_t counts[AOT_PROFILE_CHUNK];
+        if (!AotProfileRead((uint32_t)profile_chunk, counts)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+            return;
+        }
+        char response[64 + AOT_PROFILE_CHUNK * 8];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF READ %lu ", profile_chunk);
+        for (int i = 0; i < AOT_PROFILE_CHUNK; ++i) {
+            for (int shift = 28; shift >= 0; shift -= 4)
+                response[length++] = hex[(counts[i] >> shift) & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    unsigned long profile_page = 0;
+    if (sscanf(command, "AOTPROF RAMMAP %lu", &profile_page) == 1) {
+        // Which 4 KB pages of guest RAM ran code, 1024 pages a reply.
+        static const char hex[] = "0123456789ABCDEF";
+        uint8_t bitmap[128];
+        const uint32_t used = AotProfileRamMap((uint32_t)profile_page, bitmap, sizeof(bitmap));
+        char response[320];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF RAMMAP %lu %lu ", profile_page,
+                              (unsigned long)aot_profile_ram_page_count);
+        for (uint32_t i = 0; i < used; ++i) {
+            response[length++] = hex[bitmap[i] >> 4];
+            response[length++] = hex[bitmap[i] & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (sscanf(command, "AOTPROF RAMCHUNKS %lu", &profile_page) == 1) {
+        uint32_t bits = 0;
+        if (!AotProfileRamChunks((uint32_t)profile_page, &bits)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+        } else {
+            protocolReply("@B2 OK AOTPROF RAMCHUNKS %lu %08lX\n", profile_page, (unsigned long)bits);
+        }
+        return;
+    }
+    if (sscanf(command, "AOTPROF RAMREAD %lu %lu", &profile_page, &profile_chunk) == 2) {
+        static const char hex[] = "0123456789ABCDEF";
+        uint32_t counts[AOT_PROFILE_CHUNK];
+        if (!AotProfileRamRead((uint32_t)profile_page, (uint32_t)profile_chunk, counts)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+            return;
+        }
+        char response[64 + AOT_PROFILE_CHUNK * 8];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF RAMREAD %lu %lu ", profile_page,
+                              profile_chunk);
+        for (int i = 0; i < AOT_PROFILE_CHUNK; ++i) {
+            for (int shift = 28; shift >= 0; shift -= 4)
+                response[length++] = hex[(counts[i] >> shift) & 0x0f];
+        }
+        response[length] = '\0';
         protocolReply("@B2 %s\n", response + 4);
         return;
     }
@@ -1395,6 +1608,7 @@ static void automationTask(void *param)
         }
         if ((uint32_t)(millis() - last_command_ms) >= AUTOMATION_INPUT_IDLE_RELEASE_MS) {
             if (s_emulator_ready) InputAutomationReleaseAll();
+            else BootGUI_EndInjectedTouch();
             last_command_ms = millis();
         }
         if (s_serial_screenshot_locked &&

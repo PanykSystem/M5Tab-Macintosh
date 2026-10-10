@@ -46,36 +46,39 @@ Both variants share the BasiliskII core, video pipeline, USB HID handling, and b
 
 ---
 
-## v5.0.1 — Performance
+## v5.1 — Translated Code and Startup Settings
 
-[Download v5.0.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.0.1).
-This release makes the emulator substantially faster without changing what
-Mac OS draws.
+[Download v5.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1).
+The Mac's most-used ROM and system code now runs as translated native code,
+the startup screens look like Mac OS 8, and Special > Shut Down works.
 
-| Speedometer 4.02 (Quadra 605 = 1.0) | v5.0 | v5.0.1 |
+| Speedometer 4.02 (Quadra 605 = 1.0) | v5.0.1 | v5.1 |
 |---|---:|---:|
-| CPU | 0.545 | **0.804** |
-| Graphics | 0.242 | **0.496** |
-| Math | 6.68 | **9.47** |
-| Performance Rating | 0.458 | **0.765** |
+| CPU | 0.804 | 0.804 |
+| Graphics | 0.496 | **1.033** |
+| Math | 9.47 | **10.64** |
+| Performance Rating | 0.765 | **1.009** |
 
-- **Faster interpreter:** guest RAM access is inlined into each instruction,
-  ROM and screen accesses use small register-preserving helpers, Mac OS system
-  calls skip the ROM dispatcher when it is safe, condition codes take fewer
-  instructions, and the hottest 295 handlers run from internal RAM.
-- **Faster screen updates:** changes are tracked in 32-pixel spans at every
-  color depth, a new tile writer converts packed pixels straight to the panel,
-  and panel writes bypass the CPU cache shared with the emulator.
-- **Mac clock fixed:** the menu-bar clock now advances; previous versions left
-  it at the boot time.
-- **Unattended benchmarking and profiling:** `tools/speedometer_benchmark.py
-  --suite rating`, the `PERF` sampling profiler, `PEEK` and `PANEL VERIFY`.
+- **Translated ROM and system code:** hot 68k code from the Quadra 650 ROM and
+  Mac OS system software is translated to C++ at build time. It is checked
+  byte for byte before it runs, and runs from PSRAM. Everything else,
+  including applications, other ROMs and other System versions, is
+  interpreted as before. Speedometer's CPU test is its own application code,
+  so its score is unchanged.
+- **Mac OS 8 style Startup Settings:** Platinum windows and controls with the
+  Charcoal font, pixel-doubled like the Mac screen, with scrolling lists and
+  a fuller keyboard. 5.0.1 images had shipped a debug font by mistake.
+- **Shut Down works:** Mac OS shuts down and the screen says it is safe to
+  switch off. Previously the emulator crashed and the next start opened
+  recovery settings.
+- **Diagnostics:** serial protocol 5 adds startup-screen screenshots and touch,
+  panel readback in any phase, and `AOT STATS`.
 
-52 host tests pass and all five firmware profiles build. Hardware testing used
-a pre-v3 Tab5: eight full Performance Ratings with a 0-mismatch full-screen
-pixel check after each. Waveshare and Rev3 images share the code but were not
-run on hardware for this release. Native QuickDraw acceleration stays disabled.
-See the [release notes](RELEASE_NOTES.md), the
+58 host tests pass and all five firmware profiles build. The translation
+matched the interpreter in host and on-device differential tests. Hardware
+testing used a pre-v3 Tab5 with Mac OS 8.1. Waveshare and Rev3 images,
+including the new startup screens at 640x400, were not run on hardware for
+this release. See the [release notes](RELEASE_NOTES.md), the
 [performance design guide](EMULATOR_PERFORMANCE.md) and the
 [performance report](PERFORMANCE_REPORT.md).
 
@@ -86,12 +89,12 @@ Check the serial boot log or run `esptool --port PORT chip-id`.
 
 | Board / ESP32-P4 silicon | Download filename | PlatformIO environment |
 |---|---|---|
-| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.0.1.bin` | `esp32p4_pioarduino` |
-| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.0.1.bin` | `esp32p4_pioarduino_rev3` |
-| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.0.1.bin` | `waveshare_p4_101` |
-| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.0.1.bin` | `waveshare_p4_101_rev3` |
+| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.1.bin` | `esp32p4_pioarduino` |
+| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.1.bin` | `esp32p4_pioarduino_rev3` |
+| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.1.bin` | `waveshare_p4_101` |
+| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.1.bin` | `waveshare_p4_101_rev3` |
 
-The separate `M5Tab-Macintosh-USB-Debug-v5.0.1.bin` download is the tested
+The separate `M5Tab-Macintosh-USB-Debug-v5.1.bin` download is the tested
 **pre-v3 Tab5** configuration using Arduino 3.3.8 / IDF 5.5.4. It is useful for
 serial testing and for the SD-mount issue observed with the older standard Tab5
 SDK on the development unit. The standard profiles remain unchanged because
@@ -109,7 +112,7 @@ before the app starts, so application-level auto-detection cannot solve this.
 
 ### Recover after a game crash
 
-Tap the Happy Mac splash to enter Boot Settings. If necessary, create an empty
+Tap the Happy Mac splash to enter Startup Settings. If necessary, create an empty
 file named `basilisk_recovery.txt` in the SD card root; it forces settings to stay
 open until you tap Boot. Delete that file to restore normal automatic boot.
 Try disabling **Audio** or selecting a known-good disk/CD in settings.
@@ -129,13 +132,21 @@ Elecrow CrowPanel Advanced 9-inch support (#10) is still under investigation.
 Its panel, audio, SD wiring and 1024×600 scaling need a separate board port;
 these downloads do not target it. See [the issue review](ISSUE_FIXES.md).
 
+## Previous release: v5.0.1
+
+[v5.0.1 — Performance](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.0.1)
+made the interpreter and display pipeline faster (Performance Rating 0.458 to
+0.765): inline guest RAM access, native trap dispatch, cheaper condition
+codes, hot handlers in internal RAM, 32-pixel dirty spans and a packed tile
+writer. It also fixed the frozen Mac clock. All of it remains in v5.1.
+
 ## Previous release: v5.0
 
 [v5.0 — Stable](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.0)
 fixed dotted Finder borders by disabling native QuickDraw acceleration, unified
 display publication and dirty tracking across both boards, lowered the Tab5 SD
 clock to 10 MHz after startup CRC failures, and fixed rotation, overlay,
-lifecycle and input issues. All of it remains in v5.0.1; see the
+lifecycle and input issues. All of it remains in v5.1; see the
 [display review](DISPLAY_RELIABILITY_REVIEW.md),
 [QuickDraw comparison](QUICKDRAW_REGRESSION.md) and
 [SD startup record](SD_STABILITY.md).
@@ -144,7 +155,7 @@ lifecycle and input issues. All of it remains in v5.0.1; see the
 
 [v4.7.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v4.7.1)
 added faster CRC-checked serial screenshots, replay-safe input, and complete
-preboot settings control. Those features remain available in v5.0.1; see
+preboot settings control. Those features remain available in v5.1; see
 [AUTOMATION.md](AUTOMATION.md) for commands and protocol details.
 
 ## Previous release: v4.7
@@ -335,14 +346,14 @@ Q950) or `0x0276` (Classic) will boot. The default file path is
 
 <p align="center">
   <img src="screenshots/v4-WaveshareBootKeyboard.jpeg" width="45%" alt="On-screen keyboard overlay on the Waveshare P4 10.1"/>
-  <img src="screenshots/v4-Preboot.jpeg" width="45%" alt="Pre-boot configuration environment"/>
+  <img src="screenshots/v5-Preboot.png" width="45%" alt="Pre-boot Startup Settings in the Mac OS 8 Platinum style"/>
 </p>
 
 ---
 
 ## Overview
 
-This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.0.1 at **0.77 of a Macintosh Quadra 605** overall (CPU 0.80, Graphics 0.50, Math 9.5). The emulation includes:
+This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.1 at **1.01 Macintosh Quadra 605s** overall (CPU 0.80, Graphics 1.03, Math 10.6). The emulation includes:
 
 - **CPU**: Motorola 68040 interpreter with FPU (68881), native trap dispatch and hot handlers in internal RAM
 - **RAM**: Configurable from 4MB to 16MB (allocated from ESP32-P4's 32MB PSRAM)
@@ -647,7 +658,7 @@ esptool.py --chip esp32p4 \
     --port /dev/ttyACM0 \
     --baud 921600 \
     write_flash \
-    0x0 M5Tab-Macintosh-v5.0.1.bin
+    0x0 M5Tab-Macintosh-v5.1.bin
 ```
 
 **Note**: Replace `/dev/ttyACM0` with your actual port:
@@ -678,6 +689,12 @@ pio run --target upload
 pio device monitor
 ```
 
+A build from the repository alone interprets all 68k code, as v5.0.1 did. The
+release images also contain translated ROM and system code. That generated
+file is not in the repository because it is derived from Apple's ROM and
+system software. [tools/aot/README.md](tools/aot/README.md) describes how to
+generate it from your own ROM.
+
 #### Creating Release Binaries
 
 When you build with `pio run`, a merged binary is automatically created in the `release/` directory. This binary includes the bootloader, partition table, and application - ready for single-command flashing.
@@ -689,57 +706,58 @@ platform requires it). For an isolated build environment:
 python3.13 -m venv .build/release-tools
 .build/release-tools/bin/python -m pip install platformio==6.2.0 esptool==5.4.0
 PATH="$PWD/.build/release-tools/bin:$PATH" PIO="$PWD/.build/release-tools/bin/pio" \
-  ./scripts/build_release.sh v5.0.1
+  ./scripts/build_release.sh v5.1
 ```
 
 For an existing supported toolchain, use the release script:
 
 ```bash
 # Create all four versioned firmware images
-./scripts/build_release.sh v5.0.1
+./scripts/build_release.sh v5.1
 
 # Or build only production-silicon Waveshare firmware
-./scripts/build_release.sh v5.0.1 waveshare-rev3
+./scripts/build_release.sh v5.1 waveshare-rev3
 
 # Output:
-#   release/M5Tab-Macintosh-v5.0.1.bin
-#   release/M5Tab-Macintosh-Rev3-v5.0.1.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.0.1.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.0.1.bin
+#   release/M5Tab-Macintosh-v5.1.bin
+#   release/M5Tab-Macintosh-Rev3-v5.1.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.1.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.1.bin
 ```
 
 The release binary can be flashed with a single esptool command:
 
 ```bash
 esptool --chip esp32p4 --port /dev/cu.usbmodem* \
-    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.0.1.bin
+    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.1.bin
 ```
 
 ---
 
 ## Pre-Boot Environment
 
-On every startup, a **classic Mac-style pre-boot configuration screen**
-appears before the 68k actually starts. This is where you pick the
-disk, CD, RAM size, WiFi, shared folder, and (on Tab5) USB Disk mode.
+Before the 68k starts, a **Mac OS 8 style Startup Settings window**
+lets you pick the disk, CD, RAM size, Wi-Fi, shared folder, and (on Tab5)
+USB Disk mode. It uses the Platinum appearance and the Charcoal system
+font, and it is drawn at the emulated Mac's resolution and pixel-doubled
+exactly like the Mac screen, so it looks like the system you boot into.
 
 <p align="center">
-  <img src="screenshots/v4-Preboot.jpeg" width="70%" alt="Pre-boot configuration environment"/>
+  <img src="screenshots/v5-Preboot.png" width="70%" alt="Pre-boot Startup Settings in the Mac OS 8 Platinum style"/>
 </p>
 
 ### How to enter the pre-boot environment
 
-1. Power on (or reset) the device. The Happy Mac splash shows while a
-   3-second countdown ticks down at the bottom of the screen.
-2. **Tap "Change Settings"** during that countdown. The countdown
-   halts and you're dropped into the pre-boot settings screen. Stay
-   there as long as you want — nothing auto-boots out from under you.
-3. To get back here later, just power-cycle or hit reset. There is no
-   in-emulator way back; the 68k has to stop first.
+1. Power on (or reset) the device. The Happy Mac splash shows for about
+   four seconds.
+2. **Tap the screen** while the splash is showing. Startup Settings
+   opens and stays there as long as you want; nothing boots until you
+   tap **Start Up**.
+3. To get back here later, power-cycle or reset and tap the splash again,
+   or run `tools/mac_control.py boot-enter` over USB serial.
 
 If you don't tap anything, the emulator boots with the last saved
-settings after 3 seconds (or after WiFi finishes connecting, whichever
-is later — WiFi connect can extend the pause up to ~10 s).
+settings.
 
 ### What you can change
 
@@ -755,28 +773,30 @@ is later — WiFi connect can extend the pause up to ~10 s).
 
 Settings are persisted to `/basilisk_settings.txt` on the SD card, so
 the next boot starts with the same layout. The settings UI itself
-lives in [`src/basilisk/boot_gui.cpp`](src/basilisk/boot_gui.cpp).
+logic lives in [`src/basilisk/boot_gui.cpp`](src/basilisk/boot_gui.cpp); the
+screens are drawn by [`src/basilisk/preboot_screens.cpp`](src/basilisk/preboot_screens.cpp)
+with the Platinum kit in [`src/basilisk/preboot_ui.cpp`](src/basilisk/preboot_ui.cpp).
+[AUTOMATION.md](AUTOMATION.md#preboot-screenshots-and-touch) covers diagnostic
+screenshots of these screens over USB serial.
 
 ### WiFi Setup
 
 To configure WiFi before booting:
 
-1. Tap **"Change Settings"** during the countdown
-2. Tap the **"WiFi"** button at the bottom of the settings screen
-3. The device will scan for available networks
+1. Tap the splash to open Startup Settings
+2. Tap **Wi-Fi...** at the bottom of the window
+3. The device scans for networks (tap **Scan** to look again)
 4. **Select a network** from the list
-5. **Tap the password field** to open the on-screen keyboard
-6. Enter your WiFi password and tap **"OK"**
-7. Tap **"Connect"** to connect to the network
-8. Once connected, tap **"Back"** to return to settings
-9. Tap **"Boot"** to start the emulator
+5. **Tap the Password field** to open the on-screen keyboard
+6. Enter your Wi-Fi password and tap **OK**
+7. Tap **Join** to connect to the network
+8. Once connected, tap **Back** to return to Startup Settings
+9. Tap **Start Up** to start the emulator
 
-**Auto-Connect**: Once WiFi is configured, it will automatically connect on subsequent boots. The countdown screen will display:
-- "WiFi: Connecting..." while connecting
-- "WiFi: 192.168.x.x" once connected (shows your IP address)
-- "WiFi: Connection failed" if the connection fails
-
-The countdown will **pause while WiFi is connecting** (up to 10 seconds), ensuring the connection completes before booting into Mac OS.
+**Auto-Connect**: Once Wi-Fi is configured, it connects automatically on later
+boots in the background. The Network box in Startup Settings shows the live
+state ("Connecting to...", "Connected to ..." with the address, or "Could not
+connect").
 
 ### Networking Support
 
@@ -794,10 +814,10 @@ The emulator includes TCP/IP networking via the ESP32-C6 WiFi co-processor. This
 - ICMP (ping)
 
 **WiFi Setup:**
-1. During the boot countdown, tap **"Change Settings"**
-2. Tap the **"WiFi"** button to open the WiFi configuration screen
+1. Tap the splash to open Startup Settings
+2. Tap **Wi-Fi...** to open the Wi-Fi Networks window
 3. Select your network and enter the password using the on-screen keyboard
-4. Tap **"Connect"** - once connected, your IP will be displayed
+4. Tap **Join** - once connected, the status line shows your address
 5. The connection is saved and will auto-connect on future boots
 
 **Mac OS Network Setup:**
@@ -910,7 +930,9 @@ M5Tab-Macintosh/
 │       ├── main_esp32.cpp          # Emulator initialization & main loop
 │       ├── video_esp32.cpp         # Tile-based display driver with dirty tracking
 │       ├── input_esp32.cpp         # Touch + USB HID input handling
-│       ├── boot_gui.cpp            # Pre-boot configuration GUI
+│       ├── boot_gui.cpp            # Pre-boot configuration GUI (logic, input)
+│       ├── preboot_screens.cpp     # Pre-boot screen layouts (Mac OS 8 Platinum)
+│       ├── preboot_ui.cpp          # 2x canvas, Charcoal text, Platinum widgets
 │       ├── sys_esp32.cpp           # SD card disk I/O
 │       ├── timer_esp32.cpp         # 60Hz/1Hz interrupt generation
 │       ├── audio_esp32.cpp          # Sound output via ES8388 codec

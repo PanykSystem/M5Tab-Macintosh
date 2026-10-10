@@ -57,6 +57,41 @@ class BootControlTests(unittest.TestCase):
         self.client.request.return_value = '@B2 OK BOOT ITEM 0 -'
         self.assertEqual(self.client.boot_list('cdrom'), [])
 
+    def test_preboot_touch_hit_and_panel_verify(self):
+        self.client.request.return_value = '@B2 OK BOOT HIT start 514 309 104 24'
+        self.assertEqual(self.client.boot_hit('start'),
+                         {'x': 514, 'y': 309, 'w': 104, 'h': 24, 'center': [566, 321]})
+        self.client.request.assert_called_with('BOOT HIT start', 'OK BOOT HIT start', timeout=15.0)
+        with self.assertRaises(mc.ControlError): self.client.boot_hit('two words')
+        self.client.request.side_effect = ['@B2 OK BOOT HIT start 514 309 104 24',
+                                           '@B2 OK TOUCH TAP 566 321']
+        self.client.tap_control('start')
+        self.client.request.assert_called_with('TOUCH TAP 566 321', 'OK TOUCH TAP', timeout=10.0)
+        self.client.request.side_effect = None
+        self.client.touch('down', 1, 2)
+        self.client.request.assert_called_with('TOUCH DOWN 1 2', 'OK TOUCH DOWN', timeout=10.0)
+        self.client.touch('tap', 3, 4, hold_ms=250)
+        self.client.request.assert_called_with('TOUCH TAP 3 4 250', 'OK TOUCH TAP', timeout=10.0)
+        self.client.touch('up')
+        self.client.request.assert_called_with('TOUCH UP', 'OK TOUCH UP', timeout=5.0)
+        with self.assertRaises(mc.ControlError): self.client.touch('tap')
+        with self.assertRaises(mc.ControlError): self.client.touch('swipe', 1, 2)
+        self.client.request.return_value = '@B2 OK PANEL checked=921600 mismatched=3 first=10,20'
+        self.assertEqual(self.client.panel_verify(),
+                         {'checked': 921600, 'mismatched': 3, 'first': [10, 20]})
+        self.client.request.return_value = '@B2 OK PANEL checked=9'
+        with self.assertRaises(mc.ControlError): self.client.panel_verify()
+        self.client.request.side_effect = ['@B2 OK PANEL checked=921600 mismatched=0 first=-',
+                                           '@B2 OK PANEL checked=921600 mismatched=0 first=-1,-1']
+        self.assertEqual(self.client.panel_verify(),
+                         {'checked': 921600, 'mismatched': 0, 'first': [-1, -1]})
+        self.client.request.side_effect = None
+        tools = {tool['name'] for tool in mc.MCP_TOOLS}
+        self.assertTrue({'mac_touch', 'mac_boot_hit', 'mac_panel_verify', 'mac_screenshot_panel'} <= tools)
+        args = mc.build_parser().parse_args(['touch', 'tap', '5', '6', '--hold', '90'])
+        self.assertEqual((args.action, args.x, args.y, args.hold), ('tap', 5, 6, 90))
+        self.assertTrue(mc.build_parser().parse_args(['screenshot', 'x.png', '--panel']).panel)
+
     def test_malformed_responses_fail(self):
         for line in ('@B2 OK BOOT ITEM nope -', '@B2 OK BOOT ITEM 33 -', '@B2 OK BOOT ITEM 1 ff'):
             self.client.request.return_value = line
