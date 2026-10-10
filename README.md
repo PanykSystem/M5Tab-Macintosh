@@ -46,41 +46,26 @@ Both variants share the BasiliskII core, video pipeline, USB HID handling, and b
 
 ---
 
-## v5.1 — Translated Code and Startup Settings
+## v5.2 — 24 MB and Web Browsing
 
-[Download v5.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1).
-The Mac's most-used ROM and system code now runs as translated native code,
-the startup screens look like Mac OS 8, and Special > Shut Down works.
+[Download v5.2](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.2).
+Mac OS 8 can now have up to 24 MB of RAM, enough to run a period web browser,
+and Wi-Fi set to auto-connect now reaches the Mac after a normal power-on.
 
-| Speedometer 4.02 (Quadra 605 = 1.0) | v5.0.1 | v5.1 |
-|---|---:|---:|
-| CPU | 0.804 | 0.804 |
-| Graphics | 0.496 | **1.033** |
-| Math | 9.47 | **10.64** |
-| Performance Rating | 0.765 | **1.009** |
+- **20 and 24 MB of Mac RAM:** Startup Settings offers 8, 16, 20 and 24 MB.
+  Older 4 and 12 MB settings round up to 8 and 16. If a board cannot fit the
+  chosen size, startup uses the next smaller one instead of failing.
+- **Wi-Fi at power-on:** auto-connect used to be dropped before the emulator
+  started, so the Mac had no network unless settings had been changed. Startup
+  now waits up to 10 seconds for the connection.
+- **Web browsing:** Internet Explorer on Mac OS 8.1 loads plain-HTTP sites
+  such as `http://system7today.com`. Mac OS needs TCP/IP and Open Transport
+  turned on; see [Networking Support](#networking-support).
+- **Performance unchanged:** Speedometer rates 5.2 at 24 MB the same as 5.1
+  (Performance Rating 1.01).
+- **Diagnostics:** the serial `MEM` command reports free PSRAM.
 
-- **Translated ROM and system code:** hot 68k code from the Quadra 650 ROM and
-  Mac OS system software is translated to C++ at build time. It is checked
-  byte for byte before it runs, and runs from PSRAM. Everything else,
-  including applications, other ROMs and other System versions, is
-  interpreted as before. Speedometer's CPU test is its own application code,
-  so its score is unchanged.
-- **Mac OS 8 style Startup Settings:** Platinum windows and controls with the
-  Charcoal font, pixel-doubled like the Mac screen, with scrolling lists and
-  a fuller keyboard. 5.0.1 images had shipped a debug font by mistake.
-- **Shut Down works:** Mac OS shuts down and the screen says it is safe to
-  switch off. Previously the emulator crashed and the next start opened
-  recovery settings.
-- **Diagnostics:** serial protocol 5 adds startup-screen screenshots and touch,
-  panel readback in any phase, and `AOT STATS`.
-
-58 host tests pass and all five firmware profiles build. The translation
-matched the interpreter in host and on-device differential tests. Hardware
-testing used a pre-v3 Tab5 with Mac OS 8.1. Waveshare and Rev3 images,
-including the new startup screens at 640x400, were not run on hardware for
-this release. See the [release notes](RELEASE_NOTES.md), the
-[performance design guide](EMULATOR_PERFORMANCE.md) and the
-[performance report](PERFORMANCE_REPORT.md).
+See the [release notes](RELEASE_NOTES.md) for verification and limits.
 
 ### Choose the image for your chip revision
 
@@ -89,12 +74,12 @@ Check the serial boot log or run `esptool --port PORT chip-id`.
 
 | Board / ESP32-P4 silicon | Download filename | PlatformIO environment |
 |---|---|---|
-| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.1.bin` | `esp32p4_pioarduino` |
-| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.1.bin` | `esp32p4_pioarduino_rev3` |
-| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.1.bin` | `waveshare_p4_101` |
-| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.1.bin` | `waveshare_p4_101_rev3` |
+| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.2.bin` | `esp32p4_pioarduino` |
+| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.2.bin` | `esp32p4_pioarduino_rev3` |
+| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.2.bin` | `waveshare_p4_101` |
+| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.2.bin` | `waveshare_p4_101_rev3` |
 
-The separate `M5Tab-Macintosh-USB-Debug-v5.1.bin` download is the tested
+The separate `M5Tab-Macintosh-USB-Debug-v5.2.bin` download is the tested
 **pre-v3 Tab5** configuration using Arduino 3.3.8 / IDF 5.5.4. It is useful for
 serial testing and for the SD-mount issue observed with the older standard Tab5
 SDK on the development unit. The standard profiles remain unchanged because
@@ -132,13 +117,22 @@ Elecrow CrowPanel Advanced 9-inch support (#10) is still under investigation.
 Its panel, audio, SD wiring and 1024×600 scaling need a separate board port;
 these downloads do not target it. See [the issue review](ISSUE_FIXES.md).
 
+## Previous release: v5.1
+
+[v5.1 — Translated Code and Startup Settings](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1)
+runs the Mac's most-used ROM and system code as translated native code
+(Performance Rating 0.765 to 1.009), redesigns Startup Settings in the Mac OS 8
+style and makes Special > Shut Down work. All of it remains in v5.2; see the
+[performance design guide](EMULATOR_PERFORMANCE.md) and the
+[performance report](PERFORMANCE_REPORT.md).
+
 ## Previous release: v5.0.1
 
 [v5.0.1 — Performance](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.0.1)
 made the interpreter and display pipeline faster (Performance Rating 0.458 to
 0.765): inline guest RAM access, native trap dispatch, cheaper condition
 codes, hot handlers in internal RAM, 32-pixel dirty spans and a packed tile
-writer. It also fixed the frozen Mac clock. All of it remains in v5.1.
+writer. It also fixed the frozen Mac clock. All of it remains in v5.2.
 
 ## Previous release: v5.0
 
@@ -146,7 +140,7 @@ writer. It also fixed the frozen Mac clock. All of it remains in v5.1.
 fixed dotted Finder borders by disabling native QuickDraw acceleration, unified
 display publication and dirty tracking across both boards, lowered the Tab5 SD
 clock to 10 MHz after startup CRC failures, and fixed rotation, overlay,
-lifecycle and input issues. All of it remains in v5.1; see the
+lifecycle and input issues. All of it remains in v5.2; see the
 [display review](DISPLAY_RELIABILITY_REVIEW.md),
 [QuickDraw comparison](QUICKDRAW_REGRESSION.md) and
 [SD startup record](SD_STABILITY.md).
@@ -155,7 +149,7 @@ lifecycle and input issues. All of it remains in v5.1; see the
 
 [v4.7.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v4.7.1)
 added faster CRC-checked serial screenshots, replay-safe input, and complete
-preboot settings control. Those features remain available in v5.1; see
+preboot settings control. Those features remain available in v5.2; see
 [AUTOMATION.md](AUTOMATION.md) for commands and protocol details.
 
 ## Previous release: v4.7
@@ -354,7 +348,7 @@ Q950) or `0x0276` (Classic) will boot. The default file path is
 
 ## Overview
 
-This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.1 at **1.01 Macintosh Quadra 605s** overall (CPU 0.80, Graphics 1.03, Math 10.6). The emulation includes:
+This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.2 at **1.01 Macintosh Quadra 605s** overall (CPU 0.80, Graphics 1.03, Math 10.6). The emulation includes:
 
 - **CPU**: Motorola 68040 interpreter with FPU (68881), native trap dispatch and hot handlers in internal RAM
 - **RAM**: 8, 16, 20 or 24 MB (allocated from ESP32-P4's 32MB PSRAM); 20–24 MB leaves room for a web browser under Mac OS 8
@@ -662,7 +656,7 @@ esptool.py --chip esp32p4 \
     --port /dev/ttyACM0 \
     --baud 921600 \
     write_flash \
-    0x0 M5Tab-Macintosh-v5.1.bin
+    0x0 M5Tab-Macintosh-v5.2.bin
 ```
 
 **Note**: Replace `/dev/ttyACM0` with your actual port:
@@ -710,30 +704,30 @@ platform requires it). For an isolated build environment:
 python3.13 -m venv .build/release-tools
 .build/release-tools/bin/python -m pip install platformio==6.2.0 esptool==5.4.0
 PATH="$PWD/.build/release-tools/bin:$PATH" PIO="$PWD/.build/release-tools/bin/pio" \
-  ./scripts/build_release.sh v5.1
+  ./scripts/build_release.sh v5.2
 ```
 
 For an existing supported toolchain, use the release script:
 
 ```bash
 # Create all four versioned firmware images
-./scripts/build_release.sh v5.1
+./scripts/build_release.sh v5.2
 
 # Or build only production-silicon Waveshare firmware
-./scripts/build_release.sh v5.1 waveshare-rev3
+./scripts/build_release.sh v5.2 waveshare-rev3
 
 # Output:
-#   release/M5Tab-Macintosh-v5.1.bin
-#   release/M5Tab-Macintosh-Rev3-v5.1.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.1.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.1.bin
+#   release/M5Tab-Macintosh-v5.2.bin
+#   release/M5Tab-Macintosh-Rev3-v5.2.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.2.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.2.bin
 ```
 
 The release binary can be flashed with a single esptool command:
 
 ```bash
 esptool --chip esp32p4 --port /dev/cu.usbmodem* \
-    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.1.bin
+    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.2.bin
 ```
 
 ---

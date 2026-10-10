@@ -1,5 +1,18 @@
 # M5Tab-Macintosh workbook
 
+## v5.2 release — 2026-10-10
+
+Austin approved the guest RAM work, asked to merge it (PR #24, merge commit
+`2b72477`) and to release it as **5.2**. Release branch `claude/release-v5.2`
+(`worktrees/release-v5.2`) adds only the version, release notes, README and
+this section. The translation is unchanged from 5.1 (`sys-22`, SHA256
+`7fb5dfee…`). Evidence, gate and packaging scripts are in the control
+checkout's ignored `artifacts/release-v5.2/`.
+
+Pre-release checks: host AOT differential PASS (51,102 trials, 0 failures);
+on-device self-test, five-profile build with `check_blob.py`, and the Tab5
+hardware gate are recorded in `artifacts/release-v5.2/release-status.json`.
+
 ## Guest RAM up to 24 MB — 2026-10-10
 
 Austin asked for 20–24 MB of guest RAM so Mac OS 8 can run a web browser,
