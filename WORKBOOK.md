@@ -1,5 +1,54 @@
 # M5Tab-Macintosh workbook
 
+## v5.1 release — 2026-10-10
+
+Austin asked to combine the Shut Down fix with the preboot work and the other
+work since 5.0.1, push it, merge it into master and release it as 5.1. He
+chose the translated code with ROM and system code only (not Speedometer's
+own code). He asked for testing, with any issues fixed, before release. He
+also chose to publish all four board images, with Waveshare and Rev3 noted as
+build-validated only. The paused JIT is not included: it remains uncommitted
+on `codex/rv32-jit` in the control checkout, with `JIT_WORKLOG.md` there.
+
+Integration branch: `claude/release-v5.1`, in session worktree
+`.claude/worktrees/jolly-hertz-2b45fc`, based on v5.0.1 `94af0b8`:
+
+| Commit | Content |
+|---|---|
+| `5871add` | Shut Down fix (section below) |
+| `bcfa164` | Preboot UI, copied from `worktrees/preboot-ui` as it stood on 2026-10-09 23:26 |
+| `5933165` | Translated code, copied from `worktrees/perf-pass-2` (final state, identical code to its `sys-22`/`full-23` builds) |
+| `af1c02f` | Speedometer runner retries the tests-complete alert (found in pre-release testing) |
+| release commit | Version 5.1, release notes, README, this section |
+
+Those two worktrees were read, not changed; they still hold their uncommitted
+copies. Code merged without conflicts; only AUTOMATION.md and this file
+needed hand merging. The translation is the perf pass's `sys-22` generated
+file (SHA256 `7fb5dfee…95e3dc`, 537 ROM regions, 398 system modules, 680 KB).
+It is git-ignored and kept in `artifacts/release-v5.1/aot/`; a 5.1 image
+cannot be rebuilt without it.
+
+Pre-release checks on the combined code:
+
+- 58 host tests; all five profiles build, and `check_blob.py` passes on each.
+- Host differential test: 51,102 runs, 186 M instructions, 0 failures.
+  Device self-test on the Tab5: PASS, 26,866 runs, 91.8 M instructions,
+  0 failures (52 skipped by design).
+- Tab5 release candidate: 537/537 ROM regions installed. Three ratings gave
+  CPU 0.804–0.805, Graphics 1.032–1.034, Disk 1.029–1.031, Math 10.63–10.64
+  and PR 1.008–1.009. A preboot tour showed 0/921,600 panel mismatches at
+  every step. Shut Down reached the Platinum power-off alert, and the next
+  start was clean. Restart returned to the Finder. Free internal SRAM after
+  start-up is 168 KB.
+- The only issue found was in the benchmark runner (`af1c02f`), not the
+  firmware.
+
+Evidence (session worktree, ignored): `artifacts/release-v5.1/`, which holds
+the integration patches, builds, test logs, device runs, the gate's
+`hardware/health.json`, and `release-status.json` with the publication
+outcome. The three sections below record how each part was developed; their
+branch, device-state and next-step statements are historical.
+
 ## Shut Down panic fix — 2026-10-09
 
 Austin reported that Special > Shut Down on v5.0.1 (and `claude/preboot-ui`)
