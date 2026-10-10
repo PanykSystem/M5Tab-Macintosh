@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "board_config.h"
@@ -30,6 +31,18 @@ bool BoardDisplay_PushIndexedTile(int x, int y, int w, int h, const uint8_t *src
                                   uint32_t stride, int bits, int first_pixel,
                                   const uint32_t *pairs);
 void BoardDisplay_SetBacklight(int percent);
+
+/**
+ * @brief Diagnostic readback of what the panel is showing.
+ *
+ * Samples every `step`-th landscape pixel of the scanout framebuffer (1 for
+ * the full 1280-wide panel, 2 for one sample per 2x2 block) into 8-bit
+ * indices plus a 256-entry RGB565 palette built from the colors found.
+ * Colors beyond 256 map to the nearest entry. Reads through the
+ * non-cacheable view, so it never disturbs the CPU cache contents.
+ */
+bool BoardDisplay_CapturePanel(uint8_t *pixels, size_t capacity, uint16_t *palette,
+                               uint16_t *width, uint16_t *height, int step);
 
 /**
  * @brief Set whether the framebuffer should be rotated 180 degrees

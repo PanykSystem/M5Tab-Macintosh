@@ -4,8 +4,10 @@ The programming/console connection exposes an `@B2` automation protocol from
 preboot settings through emulator operation. The protocol captures the logical Mac screen and
 injects input at the ADB layer, so coordinates are always `640x360` on Tab5 or
 `640x400` on Waveshare regardless of physical panel scaling or 180-degree
-rotation. Normal touchscreen, attached keyboard, and USB mouse input continue
-to work.
+rotation. Before the emulator starts, the same screenshots show the preboot
+screens (drawn at that same logical size and pixel-doubled), and `touch`
+commands stand in for a finger. Normal touchscreen, attached keyboard, and USB
+mouse input continue to work.
 
 ## Host setup
 
@@ -196,6 +198,53 @@ with MacControl(reset_on_failure=False) as device:
     # Run guest tests, then enter preboot and restore the selected settings.
 ```
 
+## Preboot screenshots and touch
+
+The preboot screens (Startup Settings, Wi-Fi Networks, the password keyboard,
+USB Disk) draw on a canvas at the Mac's logical resolution, and the panel shows
+each logical pixel as an exact 2x2 block. Diagnostics work in every boot phase:
+
+```sh
+python3 tools/mac_control.py boot-enter                  # reboot once into settings
+python3 tools/mac_control.py screenshot --color settings.png   # 640x360 preboot screen
+python3 tools/mac_control.py screenshot --panel panel.png      # 1280x720 panel readback
+python3 tools/mac_control.py panel-verify                # panel == screen, doubled?
+python3 tools/mac_control.py boot-hit wifi               # where is the Wi-Fi... button?
+python3 tools/mac_control.py touch tap 66 320            # tap it (screenshot coordinates)
+python3 tools/mac_control.py touch down 566 321          # hold a button down...
+python3 tools/mac_control.py touch up                    # ...and release
+```
+
+- A preboot `screenshot` returns the last frame the UI presented, never a
+  half-drawn one. When no preboot canvas exists (the hand-off to the emulator)
+  it samples the panel at the same scale instead.
+- `screenshot --panel` reads the physical panel at full resolution in any phase,
+  including during emulation. It shows exactly what the display scans out, so it
+  exposes anything drawn without pixel doubling. It takes about 1.5 s.
+- `panel-verify` before the emulator starts compares all 921,600 (Tab5) panel
+  pixels with the presented screen doubled 2x; `mismatched` must be 0. During
+  emulation it compares with the guest frame buffer as before.
+- `touch tap|down|move x y [--hold ms]` and `touch up` replace the touch panel
+  for the preboot touch task. They are rejected once the emulator runs (use the
+  mouse commands then). An abandoned `down` is released after 30 s of serial
+  inactivity.
+- `boot-hit NAME` returns a control's rectangle and center on the current
+  screen. Settings: `disk`, `cdrom`, `extfs` (list frames; rows are 22 pixels
+  starting one pixel inside), `ram4`, `ram8`, `ram12`, `ram16`, `sound`,
+  `bootcd`, `rotate`, `wifi`, `usb`, `start`. Wi-Fi: `networks`, `password`,
+  `scan`, `back`, `join`. Keyboard: `key:<character>`, `shift`, `delete`,
+  `space`, `ok`, `cancel`. USB Disk: `done`. `boot-status` reports the screen
+  as `settings`, `wifi`, `keyboard`, `usb` or `firmware`.
+
+`tools/preboot_screenshots.py OUTPUT [--panel] [--usb] [--boot]` walks every
+screen this way and writes one PNG per step (plus `-panel.png` readbacks with
+`--panel`) and `manifest.json` with the boot status, `PANEL VERIFY` result and
+timings. It changes only in-memory selections and reloads the saved settings
+at the end. With `--usb` it also visits USB Disk mode, which unmounts the SD
+card while shown; on the Tab5, Done restarts the device (to release the USB
+port) and returns to the settings screen. It exits with status 2 if any step's
+panel does not match its screen.
+
 ## LLM/MCP mode
 
 The same script is a stdio MCP server with a persistent serial connection:
@@ -218,6 +267,8 @@ Configure an MCP-capable agent to launch that command. It exposes these tools:
 - `mac_boot_status`, `mac_boot_get`, `mac_boot_set`, `mac_boot_list`
 - `mac_boot_action` (`enter`, `start`, `save`, `reload`, `rescan`,
   `wifi-connect`, `wifi-disconnect`)
+- `mac_screenshot_color`, `mac_screenshot_panel`, `mac_panel_verify`
+- `mac_touch`, `mac_boot_hit` (preboot screens)
 
 `mac_screenshot` returns an MCP image content block directly, enabling the loop
 "capture -> inspect -> act -> capture" without temporary files. The server uses
@@ -227,7 +278,7 @@ stderr.
 ## Wire protocol
 
 The firmware ignores input lines without the `@B2 ` prefix, allowing diagnostic
-logs and automation traffic to share the serial link. Protocol version 4
+logs and automation traffic to share the serial link. Protocol version 5
 supports:
 
 ```text
@@ -245,7 +296,12 @@ supports:
 @B2 BOOT SAVE
 @B2 BOOT START
 @B2 BOOT WIFI CONNECT|DISCONNECT
+@B2 BOOT HIT control_name
 @B2 SCREENSHOT
+@B2 SCREENSHOT [MONO|PANEL] nonce
+@B2 TOUCH TAP|DOWN|MOVE x y [hold_ms]
+@B2 TOUCH UP
+@B2 PANEL VERIFY
 @B2 SCREENSHOT BATCH frame_id first_sequence count
 @B2 SCREENSHOT CHUNK frame_id sequence
 @B2 SCREENSHOT CLOSE frame_id
@@ -270,17 +326,22 @@ Boot responses are `OK BOOT STATUS phase screen restart_pending`,
 `OK BOOT VALUE key hex_utf8_value`, `OK BOOT ITEM total_count hex_utf8_path`,
 or `OK BOOT <action>`. A dash encodes an empty string. Integers and booleans
 are hex-encoded decimal / `true` / `false` strings. List index zero also reports
-a zero-length list (`0 -`). Errors are `ERR BOOT reason`. Guest input and
-screenshots before emulator readiness return `ERR emulator_not_ready`.
+a zero-length list (`0 -`). Errors are `ERR BOOT reason`. `BOOT HIT` replies
+`OK BOOT HIT name x y w h` in screenshot coordinates. Guest input before
+emulator readiness returns `ERR emulator_not_ready`; screenshots and
+`PANEL VERIFY` then report the preboot screen, and `TOUCH` replies
+`OK TOUCH verb [x y]` (or `ERR TOUCH emulator_running` afterwards).
+`SCREENSHOT PANEL` frames use the same header and transfer as color frames,
+at the panel's full size. Version 5 is otherwise identical to version 4.
 
 `READ` accepts 1–768 bytes within the current immutable frame and responds with
 `@B2 R frame_id byte_offset hex_data CRC32`. The header and whole-frame CRC are
 unchanged from v3. Each block must match its frame, offset, length and CRC.
 `ABORT` idempotently releases a serial frame even if its header was lost.
 For commands returning `OK`/`ERR` (including `SCREENSHOT CLOSE` and `ABORT`),
-`PING` returns `@B2 OK PONG 4 boot_session`. `REQ` takes an eight-digit
+`PING` returns `@B2 OK PONG 5 boot_session`. `REQ` takes an eight-digit
 hexadecimal request ID followed by that eight-digit boot session and returns
-`@B2 RES 0123ABCD OK PONG 4 boot_session` or a matching tagged error. Requests
+`@B2 RES 0123ABCD OK PONG 5 boot_session` or a matching tagged error. Requests
 must be serialized: only the most recent tagged request is cached. Reusing its
 ID with a different command is rejected. Screenshot capture and
 data reads use their existing nonce/frame identifiers and are sent unwrapped.
@@ -353,7 +414,7 @@ Diagnostic commands (all read-only for the guest):
 | `PERF STATE` | Counters for the last window and sample count |
 | `PERF READ offset` | Up to 24 raw samples as hex |
 | `PEEK hexaddr length` | Up to 256 bytes of guest RAM or ROM as hex |
-| `PANEL VERIFY` | Compares every physical panel pixel with the guest frame buffer's palette color |
+| `PANEL VERIFY` | Compares every physical panel pixel with the guest frame buffer's palette color (before the emulator starts: with the preboot screen, doubled) |
 
 `PANEL VERIFY` reads the panel through the display's scanout view, so it
 checks what is actually shown, including scaling and rotation. Run it on a

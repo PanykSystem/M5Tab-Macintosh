@@ -109,7 +109,7 @@ before the app starts, so application-level auto-detection cannot solve this.
 
 ### Recover after a game crash
 
-Tap the Happy Mac splash to enter Boot Settings. If necessary, create an empty
+Tap the Happy Mac splash to enter Startup Settings. If necessary, create an empty
 file named `basilisk_recovery.txt` in the SD card root; it forces settings to stay
 open until you tap Boot. Delete that file to restore normal automatic boot.
 Try disabling **Audio** or selecting a known-good disk/CD in settings.
@@ -335,7 +335,7 @@ Q950) or `0x0276` (Classic) will boot. The default file path is
 
 <p align="center">
   <img src="screenshots/v4-WaveshareBootKeyboard.jpeg" width="45%" alt="On-screen keyboard overlay on the Waveshare P4 10.1"/>
-  <img src="screenshots/v4-Preboot.jpeg" width="45%" alt="Pre-boot configuration environment"/>
+  <img src="screenshots/v5-Preboot.png" width="45%" alt="Pre-boot Startup Settings in the Mac OS 8 Platinum style"/>
 </p>
 
 ---
@@ -719,27 +719,28 @@ esptool --chip esp32p4 --port /dev/cu.usbmodem* \
 
 ## Pre-Boot Environment
 
-On every startup, a **classic Mac-style pre-boot configuration screen**
-appears before the 68k actually starts. This is where you pick the
-disk, CD, RAM size, WiFi, shared folder, and (on Tab5) USB Disk mode.
+Before the 68k starts, a **Mac OS 8 style Startup Settings window**
+lets you pick the disk, CD, RAM size, Wi-Fi, shared folder, and (on Tab5)
+USB Disk mode. It uses the Platinum appearance and the Charcoal system
+font, and it is drawn at the emulated Mac's resolution and pixel-doubled
+exactly like the Mac screen, so it looks like the system you boot into.
 
 <p align="center">
-  <img src="screenshots/v4-Preboot.jpeg" width="70%" alt="Pre-boot configuration environment"/>
+  <img src="screenshots/v5-Preboot.png" width="70%" alt="Pre-boot Startup Settings in the Mac OS 8 Platinum style"/>
 </p>
 
 ### How to enter the pre-boot environment
 
-1. Power on (or reset) the device. The Happy Mac splash shows while a
-   3-second countdown ticks down at the bottom of the screen.
-2. **Tap "Change Settings"** during that countdown. The countdown
-   halts and you're dropped into the pre-boot settings screen. Stay
-   there as long as you want — nothing auto-boots out from under you.
-3. To get back here later, just power-cycle or hit reset. There is no
-   in-emulator way back; the 68k has to stop first.
+1. Power on (or reset) the device. The Happy Mac splash shows for about
+   four seconds.
+2. **Tap the screen** while the splash is showing. Startup Settings
+   opens and stays there as long as you want; nothing boots until you
+   tap **Start Up**.
+3. To get back here later, power-cycle or reset and tap the splash again,
+   or run `tools/mac_control.py boot-enter` over USB serial.
 
 If you don't tap anything, the emulator boots with the last saved
-settings after 3 seconds (or after WiFi finishes connecting, whichever
-is later — WiFi connect can extend the pause up to ~10 s).
+settings.
 
 ### What you can change
 
@@ -755,28 +756,30 @@ is later — WiFi connect can extend the pause up to ~10 s).
 
 Settings are persisted to `/basilisk_settings.txt` on the SD card, so
 the next boot starts with the same layout. The settings UI itself
-lives in [`src/basilisk/boot_gui.cpp`](src/basilisk/boot_gui.cpp).
+logic lives in [`src/basilisk/boot_gui.cpp`](src/basilisk/boot_gui.cpp); the
+screens are drawn by [`src/basilisk/preboot_screens.cpp`](src/basilisk/preboot_screens.cpp)
+with the Platinum kit in [`src/basilisk/preboot_ui.cpp`](src/basilisk/preboot_ui.cpp).
+[AUTOMATION.md](AUTOMATION.md#preboot-screenshots-and-touch) covers diagnostic
+screenshots of these screens over USB serial.
 
 ### WiFi Setup
 
 To configure WiFi before booting:
 
-1. Tap **"Change Settings"** during the countdown
-2. Tap the **"WiFi"** button at the bottom of the settings screen
-3. The device will scan for available networks
+1. Tap the splash to open Startup Settings
+2. Tap **Wi-Fi...** at the bottom of the window
+3. The device scans for networks (tap **Scan** to look again)
 4. **Select a network** from the list
-5. **Tap the password field** to open the on-screen keyboard
-6. Enter your WiFi password and tap **"OK"**
-7. Tap **"Connect"** to connect to the network
-8. Once connected, tap **"Back"** to return to settings
-9. Tap **"Boot"** to start the emulator
+5. **Tap the Password field** to open the on-screen keyboard
+6. Enter your Wi-Fi password and tap **OK**
+7. Tap **Join** to connect to the network
+8. Once connected, tap **Back** to return to Startup Settings
+9. Tap **Start Up** to start the emulator
 
-**Auto-Connect**: Once WiFi is configured, it will automatically connect on subsequent boots. The countdown screen will display:
-- "WiFi: Connecting..." while connecting
-- "WiFi: 192.168.x.x" once connected (shows your IP address)
-- "WiFi: Connection failed" if the connection fails
-
-The countdown will **pause while WiFi is connecting** (up to 10 seconds), ensuring the connection completes before booting into Mac OS.
+**Auto-Connect**: Once Wi-Fi is configured, it connects automatically on later
+boots in the background. The Network box in Startup Settings shows the live
+state ("Connecting to...", "Connected to ..." with the address, or "Could not
+connect").
 
 ### Networking Support
 
@@ -794,10 +797,10 @@ The emulator includes TCP/IP networking via the ESP32-C6 WiFi co-processor. This
 - ICMP (ping)
 
 **WiFi Setup:**
-1. During the boot countdown, tap **"Change Settings"**
-2. Tap the **"WiFi"** button to open the WiFi configuration screen
+1. Tap the splash to open Startup Settings
+2. Tap **Wi-Fi...** to open the Wi-Fi Networks window
 3. Select your network and enter the password using the on-screen keyboard
-4. Tap **"Connect"** - once connected, your IP will be displayed
+4. Tap **Join** - once connected, the status line shows your address
 5. The connection is saved and will auto-connect on future boots
 
 **Mac OS Network Setup:**
@@ -910,7 +913,9 @@ M5Tab-Macintosh/
 │       ├── main_esp32.cpp          # Emulator initialization & main loop
 │       ├── video_esp32.cpp         # Tile-based display driver with dirty tracking
 │       ├── input_esp32.cpp         # Touch + USB HID input handling
-│       ├── boot_gui.cpp            # Pre-boot configuration GUI
+│       ├── boot_gui.cpp            # Pre-boot configuration GUI (logic, input)
+│       ├── preboot_screens.cpp     # Pre-boot screen layouts (Mac OS 8 Platinum)
+│       ├── preboot_ui.cpp          # 2x canvas, Charcoal text, Platinum widgets
 │       ├── sys_esp32.cpp           # SD card disk I/O
 │       ├── timer_esp32.cpp         # 60Hz/1Hz interrupt generation
 │       ├── audio_esp32.cpp          # Sound output via ES8388 codec

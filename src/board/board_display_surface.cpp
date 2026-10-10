@@ -73,6 +73,50 @@ extern "C" bool BoardDisplay_EndTiles(void)
     return ok;
 }
 
+extern "C" bool BoardDisplay_CapturePanel(uint8_t *pixels, size_t capacity, uint16_t *palette,
+                                          uint16_t *width, uint16_t *height, int step)
+{
+    if (!s_surface_mutex || !pixels || !palette || !width || !height || step < 1) return false;
+    const int w = BOARD_DISPLAY_WIDTH / step, h = BOARD_DISPLAY_HEIGHT / step;
+    if (capacity < (size_t)w * h) return false;
+    const uint16_t *fb = s_gfx.scanoutFb();
+    const bool flip = s_gfx.flip180();
+    // Open-addressed color -> index table; only the automation task calls this.
+    static int16_t slots[1024];
+    for (int16_t &slot : slots) slot = -1;
+    int count = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const uint16_t c = readPanelPixel(fb, s_gfx.panelW(), s_gfx.panelH(), flip,
+                                              x * step, y * step);
+            unsigned hash = (c * 40503u) >> 6 & 1023u;
+            int index = -1;
+            while (slots[hash] >= 0) {
+                if (palette[slots[hash]] == c) { index = slots[hash]; break; }
+                hash = (hash + 1) & 1023u;
+            }
+            if (index < 0 && count < 256) {
+                index = count++;
+                palette[index] = c;
+                slots[hash] = (int16_t)index;
+            } else if (index < 0) {
+                long best = -1;
+                for (int i = 0; i < 256; ++i) {
+                    const int dr = (c >> 11) - (palette[i] >> 11);
+                    const int dg = ((c >> 5) & 63) - ((palette[i] >> 5) & 63);
+                    const int db = (c & 31) - (palette[i] & 31);
+                    const long d = 4L * dr * dr + dg * dg + 4L * db * db;
+                    if (best < 0 || d < best) { best = d; index = i; }
+                }
+            }
+            pixels[(size_t)y * w + x] = (uint8_t)index;
+        }
+    for (int i = count; i < 256; ++i) palette[i] = 0;
+    *width = (uint16_t)w;
+    *height = (uint16_t)h;
+    return true;
+}
+
 extern "C" void BoardDisplay_Present(void)
 {
     if (!s_surface_mutex) return;

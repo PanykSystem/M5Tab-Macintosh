@@ -39,7 +39,7 @@
 #include "input.h"
 
 #include "board_config.h"
-#include "chicago_font_data.h"
+#include "charcoal_font_data.h"
 
 #include <Arduino.h>
 #include "freertos/FreeRTOS.h"
@@ -1189,7 +1189,7 @@ static inline void put_subpixel(uint16_t *buf, int tw, int x, int y, uint16_t c)
 
 /* Render a single character glyph into the tile buffer at 25% stipple.
  * Glyph pen is at (pen_x, baseline_y) in physical pixels; baseline_y is
- * the physical y where CHICAGO_ASCENT lives above it. `scale` magnifies
+ * the physical y where CHARCOAL_ASCENT lives above it. `scale` magnifies
  * each source pixel to a scale x scale physical block. Returns the pen
  * advance in physical pixels (already scaled). */
 static int composite_glyph(uint16_t *buf,
@@ -1198,8 +1198,8 @@ static int composite_glyph(uint16_t *buf,
                            int scale, uint16_t color)
 {
     unsigned char uc = (unsigned char)c;
-    if (uc < CHICAGO_FIRST_CP || uc > CHICAGO_LAST_CP) uc = '?';
-    const ChicagoGlyph *g = &CHICAGO_GLYPH_TABLE[uc - CHICAGO_FIRST_CP];
+    if (uc < CHARCOAL_FIRST_CP || uc > CHARCOAL_LAST_CP) uc = '?';
+    const CharcoalGlyph *g = &CHARCOAL_GLYPH_TABLE[uc - CHARCOAL_FIRST_CP];
 
     /* Scaled glyph top-left in physical pixels. */
     int bm_x = pen_x + g->bbx_x * scale;
@@ -1207,7 +1207,7 @@ static int composite_glyph(uint16_t *buf,
     int row_bytes = (g->w + 7) / 8;
 
     for (int gy = 0; gy < g->h; ++gy) {
-        const uint8_t *row = &CHICAGO_GLYPH_BLOB[g->offset + gy * row_bytes];
+        const uint8_t *row = &CHARCOAL_GLYPH_BLOB[g->offset + gy * row_bytes];
         /* Physical y-range this source row covers. */
         int py0 = bm_y + gy * scale;
         int py1 = py0 + scale;
@@ -1243,8 +1243,8 @@ static int measure_label(const char *s, int scale)
     int w = 0;
     while (*s) {
         unsigned char uc = (unsigned char)*s++;
-        if (uc < CHICAGO_FIRST_CP || uc > CHICAGO_LAST_CP) uc = '?';
-        w += CHICAGO_GLYPH_TABLE[uc - CHICAGO_FIRST_CP].advance;
+        if (uc < CHARCOAL_FIRST_CP || uc > CHARCOAL_LAST_CP) uc = '?';
+        w += CHARCOAL_GLYPH_TABLE[uc - CHARCOAL_FIRST_CP].advance;
     }
     return w * scale;
 }
@@ -1323,16 +1323,16 @@ static void composite_key(uint16_t *buf, int tile_x, int tile_y, int tw, int th,
     if (k->label && k->label[0]) {
         const int scale = OVERLAY_LABEL_SCALE;
         int label_w_px = measure_label(k->label, scale);
-        int label_h_px = (CHICAGO_ASCENT + CHICAGO_DESCENT) * scale;
+        int label_h_px = (CHARCOAL_ASCENT + CHARCOAL_DESCENT) * scale;
         int pen_x = k->x + (k->w - label_w_px) / 2;
-        int baseline_y = k->y + (k->h + label_h_px) / 2 - CHICAGO_DESCENT * scale;
+        int baseline_y = k->y + (k->h + label_h_px) / 2 - CHARCOAL_DESCENT * scale;
         /* Snap pen so glyph stipple lands on even-even sub-pixels. */
         pen_x &= ~1;
         baseline_y &= ~1;
 
         /* Quick reject: label's vertical band doesn't hit the tile. */
-        int label_top = baseline_y - CHICAGO_ASCENT * scale;
-        int label_bot = baseline_y + CHICAGO_DESCENT * scale;
+        int label_top = baseline_y - CHARCOAL_ASCENT * scale;
+        int label_bot = baseline_y + CHARCOAL_DESCENT * scale;
         if (label_bot < tile_y || label_top >= tile_y + th) {
             /* skip label but still drew background/border above */
         } else {

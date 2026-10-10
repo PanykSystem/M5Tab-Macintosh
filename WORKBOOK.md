@@ -57,6 +57,73 @@ preboot-ui protocol-5 build) is backed up as
 need his approval. `claude/preboot-ui` needs this fix before its own Shut Down
 test.
 
+## Preboot UI redesign and diagnostic screenshots — 2026-10-09
+
+Austin reported the preboot UI had "gotten all wonky" and asked for a Mac OS 8
+look (Charcoal font, pixel-doubled like the Mac screen) plus diagnostic
+screenshots of the preboot environment. Work is on branch `claude/preboot-ui`
+(`worktrees/preboot-ui`, based on master `94af0b8`), uncommitted. The control
+checkout's paused JIT work is untouched.
+
+Root cause of the regression: `scripts/build_assets.py` needed Pillow for the
+Chicago TTF and PNG artwork, PlatformIO's Python has no Pillow, and the
+fallback was silent. Builds from fresh worktrees therefore shipped the 5x7
+debug font and a placeholder Happy Mac: the published v5.0.1 images and the
+AOT image that was on the Tab5 both contain it. The old UI also drew 1-pixel
+lines at native panel resolution (not doubled) and left a stipple stripe
+through the settings window.
+
+Changes:
+
+- `preboot_ui.cpp` draws on a 640x360 (Waveshare 640x400) indexed canvas and
+  presents changed areas through the emulator's own 2x indexed tile path.
+  Platinum chrome, buttons, checkboxes, radios and scroll bars were measured
+  pixel by pixel from Mac OS 8.1 running in the emulator. Icons and the desktop
+  speckle are original.
+- `assets/fonts/charcoal12.bdf` is a Charcoal 12 recreation traced from guest
+  rendering; it reproduces the guest's text with 0 differing pixels. It
+  replaces Chicago everywhere, including the emulator's touch keyboard overlay.
+  `chicago_font.*` and `pixChicago.ttf` are removed.
+- `build_assets.py` is standard-library only (own PNG decoder, verified
+  identical to Pillow). It regenerates every header deterministically each
+  build, and a present-but-undecodable asset fails the build. Also fixes a
+  latent `_parse_bdf` bug that kept only the last glyph.
+- `preboot_screens.cpp` holds pure layouts (settings, Wi-Fi, password
+  keyboard, alerts, splash) shared by painting, hit testing and host tests.
+  Behavior changes: lists scroll (arrows auto-repeat, track pages); one row per
+  Wi-Fi name (strongest access point); the keyboard adds `- _ , . / ; : ' " = +`;
+  Cancel discards typed text; the Tab5 USB Disk "Done" restart now returns to
+  settings, as the alert says.
+- Protocol 5 (`AUTOMATION.md#preboot-screenshots-and-touch`): screenshots and
+  `PANEL VERIFY` before the emulator starts, `SCREENSHOT PANEL` (1280x720
+  readback, any phase, ~1.5 s), `TOUCH`, `BOOT HIT`. The tour tool
+  `tools/preboot_screenshots.py` captures every screen with verification.
+
+Verification: 55 host tests pass, including native renders of every screen on
+both boards and rotations with an exact 2x panel check. All five profiles
+build. On the Tab5 (final debug app SHA256
+`2f725a84d8793a812a23cabf85b1bf0164bdfd84d0706d8da5eb2d9ecf5bd96f`, readback
+match), the full tour (settings, pressed button, list and radio edits, Wi-Fi
+scan, keyboard typing, reload, USB Disk and its restart) had 0/921,600 panel
+mismatches at every step. Start Up reached Finder, emulator `PANEL VERIFY`
+0 mismatches, and the saved settings equal the session baseline. Evidence:
+control checkout `artifacts/preboot-ui/` (`before/`, `final/tour/`,
+`final/boot-check.json`, build and test logs).
+
+Not verified: physical finger touches (all input was injected through the touch
+task), Waveshare hardware, the error alert on hardware. Found but not fixed
+(pre-existing on master): Mac OS Special > Shut Down panics in
+`m68k_do_execute` after `QuitEmulator`, so "safe to switch off" never shows.
+
+Device state: the Tab5 runs the final debug build above, on the Startup
+Settings screen, settings unchanged. Its previous application (the AOT
+`full-23` performance image, 5.0.1) is backed up as
+`artifacts/preboot-ui/hardware/app-partition-before.bin` (SHA256
+`05fe438e…bd18a2`); restore with an app-only write at 0x10000.
+
+Next: Austin reviews the screens on the device; commit/PR on his approval;
+rebuild release images so they carry the real font.
+
 ## v5.0.1 Performance release — 2026-09-27
 
 Austin asked to raise Speedometer 4.02 Performance Rating CPU and Graphics

@@ -81,6 +81,14 @@ void BootGUI_StopTouchTask(void);
 bool BootGUI_PollTouch(BootGUITouch *out);
 
 /*
+ *  Serial automation: override the touch panel with a synthetic contact at
+ *  panel coordinates (x, y) until BootGUI_EndInjectedTouch(). Returns false
+ *  when the touch task is not running (the emulator owns input then).
+ */
+bool BootGUI_InjectTouch(int x, int y, bool pressed);
+void BootGUI_EndInjectedTouch(void);
+
+/*
  *  Get the selected hard disk path
  *  Returns pointer to static buffer with path (e.g., "/Macintosh8.dsk")
  *  Returns empty string if no disk selected
