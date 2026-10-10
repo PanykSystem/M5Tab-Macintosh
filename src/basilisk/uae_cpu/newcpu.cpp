@@ -678,6 +678,11 @@ void init_m68k (void)
 	// Only needed when the full 256KB table is in PSRAM.
 	build_compact_dispatch();
 #endif
+#if !COUNT_INSTRS
+	// The decode table is only needed to build cpufunctbl. Releasing its
+	// 1 MB of PSRAM leaves runtime headroom beside 24 MB of guest RAM.
+	free_table68k ();
+#endif
 
 #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
 	spcflags_lock = B2_create_mutex();
@@ -2399,6 +2404,11 @@ void m68k_disasm (uaecptr addr, uaecptr *nextpc, int cnt)
 		}
 		opcode = get_iword_1 (m68kpc_offset);
 		m68kpc_offset += 2;
+		if (table68k == NULL) {
+			// Released after startup: show the raw words only.
+			printf ("\n");
+			continue;
+		}
 		if (cpufunctbl[cft_map(opcode)] == op_illg_1) {
 			opcode = 0x4AFC;
 		}
