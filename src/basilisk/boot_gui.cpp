@@ -1879,6 +1879,19 @@ bool BootGUI_Init(void)
     return true;
 }
 
+// Wait up to ten seconds for an auto-connect to finish, servicing serial
+// control meanwhile. Stops early once the network is missing or refused.
+static void waitForWiFiAutoConnect(void)
+{
+    uint32_t start = millis();
+    while (millis() - start < 10000) {
+        wl_status_t status = WiFi.status();
+        if (status == WL_CONNECTED || status == WL_CONNECT_FAILED || status == WL_NO_SSID_AVAIL) break;
+        BootGUI_ControlPoll();
+        delay(20);
+    }
+}
+
 // Shared WiFi cleanup path - used at the end of either settings or the
 // silent (no-tap) boot flow. Leaves WiFi up if the user configured it and
 // it actually connected; otherwise powers it down to free runtime state.
@@ -1891,13 +1904,15 @@ static void bootGuiCleanupWifi(void)
         if (BOOTGUI_ENABLE_WIFI_AUTOCONNECT && wifi_auto_connect && wifi_ssid[0]) {
             initWiFi();
             WiFi.begin(wifi_ssid, wifi_password);
-            uint32_t start = millis();
-            while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-                BootGUI_ControlPoll();
-                delay(20);
-            }
+            waitForWiFiAutoConnect();
         }
         control_wifi_changed = false;
+    } else if (wifi_initialized && BOOTGUI_ENABLE_WIFI_AUTOCONNECT && wifi_auto_connect && wifi_ssid[0]) {
+        // The power-on auto-connect runs in the background and is usually
+        // still associating when the splash starts the emulator. The
+        // emulator's network driver only checks once, at startup, so give
+        // it the same time as above instead of dropping the association.
+        waitForWiFiAutoConnect();
     }
     if (!wifi_initialized) {
         return;

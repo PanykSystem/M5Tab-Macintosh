@@ -825,11 +825,19 @@ The emulator includes TCP/IP networking via the ESP32-C6 WiFi co-processor. This
 5. The connection is saved and will auto-connect on future boots
 
 **Mac OS Network Setup:**
-1. In MacOS 8.x, open **TCP/IP Control Panel** and set:
+1. If **TCP/IP** is missing from Control Panels, open **Extensions Manager**,
+   turn on TCP/IP and the Open Transport extensions (Open Transport Library,
+   OpenTransportLib, Open Tpt Internet Library, OpenTptInternetLib, Open Tpt
+   AppleTalk Library, OpenTptAppleTalkLib) and restart.
+2. In MacOS 8.x, open **TCP/IP Control Panel** and set:
    - Connect via: **Ethernet**
    - Configure: **Using DHCP Server**
    
    That's it! DHCP will automatically configure all network settings.
+
+Period browsers cannot negotiate modern HTTPS. Use plain-HTTP sites such as
+`http://system7today.com`, which Internet Explorer 3 on Mac OS 8.1 loads with
+24 MB of guest RAM.
 
 **Manual Configuration (if needed):**
 - IP Address: `10.0.2.15`
