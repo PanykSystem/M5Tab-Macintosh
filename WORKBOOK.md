@@ -19,7 +19,8 @@ Integration branch: `claude/release-v5.1`, in session worktree
 | `bcfa164` | Preboot UI, copied from `worktrees/preboot-ui` as it stood on 2026-10-09 23:26 |
 | `5933165` | Translated code, copied from `worktrees/perf-pass-2` (final state, identical code to its `sys-22`/`full-23` builds) |
 | `af1c02f` | Speedometer runner retries the tests-complete alert (found in pre-release testing) |
-| release commit | Version 5.1, release notes, README, this section |
+| `7af6bed` | Version 5.1, release notes, README, this section |
+| `80c2a47` | Client retries `PANEL VERIFY` when its reply is cut short (found in the hardware gate) |
 
 Those two worktrees were read, not changed; they still hold their uncommitted
 copies. Code merged without conflicts; only AUTOMATION.md and this file
@@ -40,8 +41,24 @@ Pre-release checks on the combined code:
   every step. Shut Down reached the Platinum power-off alert, and the next
   start was clean. Restart returned to the Finder. Free internal SRAM after
   start-up is 168 KB.
-- The only issue found was in the benchmark runner (`af1c02f`), not the
-  firmware.
+- Issues found were all in host tooling, not firmware. The Speedometer runner
+  could leave the tests-complete alert open (`af1c02f`), and the client failed
+  on a `PANEL VERIFY` reply cut short by other serial output (`80c2a47`).
+  The gate script also needed to answer Speedometer's "Save before
+  quitting?" prompt. Release images are byte-identical between `7af6bed`
+  and `80c2a47`.
+
+Hardware gate on the final debug app (`eda80f43…`, byte-identical at
+`7af6bed` and `80c2a47`): readback matched, 5.1 banner, all 537 ROM regions
+installed, Finder with settings preserved. Rating: CPU 0.804, Graphics 1.032,
+Disk 1.031, Math 10.64, PR 1.009. `PANEL VERIFY` 0/921,600. Shut Down
+reached the power-off alert (phase `stopped`), and the next start was clean
+with no crash markers. Another gate attempt on the same image rated PR 1.000
+(Disk 0.986, Math 10.40), the low end of run-to-run variation.
+
+Device state: the Tab5 runs the 5.1 debug app at the Finder, with settings
+unchanged. Its earlier application (the preboot-ui build) is backed up at
+`artifacts/shutdown-quit/hardware/app-partition-before.bin` in this worktree.
 
 Evidence (session worktree, ignored): `artifacts/release-v5.1/`, which holds
 the integration patches, builds, test logs, device runs, the gate's
