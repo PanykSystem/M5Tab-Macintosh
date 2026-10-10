@@ -1,8 +1,8 @@
 # Emulator performance design
 
-This guide explains the interpreter and display fast paths added in 5.0.1:
-how each one works, what it assumes, how it was measured and what to recheck
-when changing it. [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md) keeps the
+This guide explains the interpreter and display fast paths added in 5.0.1
+and the translated code added after it: how each one works, what it assumes,
+how it was measured and what to recheck when changing it. [PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md) keeps the
 build-by-build measurements. [AUTOMATION.md](AUTOMATION.md) documents the
 benchmark and diagnostic commands.
 
@@ -11,13 +11,25 @@ benchmark and diagnostic commands.
 Speedometer 4.02, **Tests > Performance Rating** (Quadra 605 = 1.0), all four
 tests, on a Tab5 with ESP32-P4 revision 1.3 at 360 MHz running Mac OS 8:
 
-| Score | 5.0 | 5.0.1 | Change |
-|---|---:|---:|---:|
-| CPU | 0.545 | 0.803–0.804 | +47% |
-| Graphics | 0.242–0.244 | 0.495–0.497 | +104% |
-| Disk | 1.02 | 1.029–1.033 | unchanged |
-| Math | 6.68 | 9.43–9.48 | +42% |
-| Performance Rating | 0.458 | 0.765–0.766 | +67% |
+| Score | 5.0 | 5.0.1 | Translated ROM and system code | With Speedometer's own code translated |
+|---|---:|---:|---:|---:|
+| CPU | 0.545 | 0.803–0.804 | 0.804 | 1.603–1.604 |
+| Graphics | 0.242–0.244 | 0.495–0.497 | 1.023–1.025 | 1.012–1.014 |
+| Disk | 1.02 | 1.029–1.033 | 1.027–1.028 | 1.024–1.030 |
+| Math | 6.68 | 9.43–9.48 | 10.48 | 11.11–11.12 |
+| Performance Rating | 0.458 | 0.765–0.766 | 1.006 | 1.334–1.335 |
+
+The two translated columns differ in one thing. The CPU test is a sort loop
+inside Speedometer itself; it runs no ROM or system code, so translating
+those leaves it where the interpreter puts it. The last column also
+translates the application code that ran while the profile was taken, which
+includes that loop. It shows what profiling a program buys that program, not
+what an unprofiled program gets: for that, read the third column.
+
+Color QuickDraw (the same program's **Color** tests) went from 0.549 to
+1.00 in monochrome and from 0.509 to 0.87 in 8-bit colour (1.007 and 0.869
+in the third column's build, 1.001 and 0.868 in the fourth's). A cold start
+reaches the Finder in 49.6 to 49.7 s, against 49.5 s for 5.0.1.
 
 Native QuickDraw acceleration stays disabled, as in 5.0.
 
@@ -203,6 +215,139 @@ from 231 KB (5.0) to 177 KB. After changing either list, compare the boot log
 line `Internal SRAM after init` and re-measure. More IRAM is not automatically
 faster, because it shrinks the heap that other drivers use.
 
+## Translated code
+
+Files: `tools/aot/`, `src/basilisk/aot/`, `test/aot_host/`, `test/test_aot.py`.
+Procedure: [tools/aot/README.md](tools/aot/README.md).
+
+The interpreter pays for every 68k instruction separately: fetch the opcode,
+look up and call a handler, decode operands, compute every condition code,
+store the PC. Most of that is the same each time an instruction runs. For
+code whose bytes are known in advance it can be done once, at build time.
+
+`aot_translate.py` takes the instructions a profiling build saw executed and
+writes one C++ function per *region* of them. The body of each instruction is
+the text of the interpreter's own handler from `cpuemu.cpp`, with the opcode,
+extension words and PC replaced by constants. A translated instruction
+therefore computes what the interpreter computes, by construction. The
+compiler then removes what the constants make unnecessary: operand decoding,
+and the condition codes that the following 68k code overwrites without
+reading (they live in locals inside a region). Branches inside a region are
+gotos.
+
+This is not a JIT. Nothing is generated, written or made executable while the
+emulator runs, and internal RAM stays under the P4's write/execute
+protection. The firmware only decides which of its own functions to call.
+
+### What is translated
+
+| | ROM | RAM |
+|---|---|---|
+| Code | Quadra ROM routines | Mac OS and application code in guest RAM |
+| Unit | Region, at a fixed address | Module of adjacent instructions, position independent |
+| Installed | Once, by `AotInstall()` at start-up | Where the code is seen running (`AotRamSample()`) |
+| Bytes checked | CRC-32 of every region, before any is installed | All of the module at installation, and again after every guest cache flush |
+| Off switch | `-DAOT_ROM=0` | `-DAOT_RAM=0` |
+
+An entry point is installed by replacing the first opcode of its 68k code
+with an opcode that no 68040 instruction, Mac trap or Basilisk `EMUL_OP`
+uses. The opcode table maps it to the region function. 3,840 such opcodes
+exist (`0x73xx`…`0x7Fxx` with an odd high byte, and `0xF8xx`…`0xFFxx`); one
+region's are consecutive and share their high byte, so the entry number is a
+shift and a subtraction.
+
+### Rules
+
+These are what make the translation safe. Each has a test.
+
+1. **Only counted addresses are instructions.** The profiling build counts
+   every instruction it dispatches. A *sampled* PC is not evidence: handlers
+   advance the PC while they run, so a sample can lie inside an instruction.
+   (The first translator used samples and patched an extension word.)
+2. **No entry point inside another instruction.** The bytes after the first
+   word of any executed instruction are never patched, even where another
+   path executes them as an instruction of their own.
+3. **Anything unrecognized ends the region.** A handler body may only call
+   what the translator lists (`ALLOWED_CALLS`). Traps, `EMUL_OP`s, FPU,
+   privileged and exception-raising instructions are left to the
+   interpreter. Division and `MULL` are translated with their exception and
+   flag handling routed back through the interpreter's functions.
+4. **An entry opcode is only honoured in place.** A region checks that the
+   PC is where it was installed. Anywhere else (the guest copied the code),
+   and in trace mode, it runs the original instruction.
+5. **RAM modules follow the 68040's own contract.** Code that changes must
+   not be executed until the instruction cache has been flushed; Mac OS on a
+   68040 keeps to that. `CINV`/`CPUSH` and the emulator's own writes to code
+   (`FlushCodeCache`) advance an epoch; a module entered in a new epoch has
+   all its bytes compared first. If they differ, the entry puts the original
+   instruction back and the interpreter carries on.
+6. **A module is installed only where it is executing.** `AotRamSample()`
+   looks at the PC between batches of instructions. Memory that merely holds
+   the same bytes (a file being copied) is never touched.
+7. **Regions give way.** Every backward branch polls the special flags and an
+   instruction budget, so interrupts are taken as promptly as between
+   interpreted instructions.
+8. **Arithmetic wraps.** The handlers compute flags from sums that overflow
+   a signed `int`. With operands folded to constants the compiler used that
+   to drop a flag computation; the firmware is built with `-fwrapv`.
+
+### Where the code runs
+
+Translated code is 500 to 710 KB, depending on the profile. Internal RAM has room for about 50 KB of
+emulator code, so it cannot live there. It is linked into flash and copied to
+PSRAM at start-up (`AOT_PSRAM`): both are reached through the same caches,
+but a cache miss is filled from PSRAM (16 lines, 200 MHz) several times
+faster than from flash (4 lines, 80 MHz). That was worth 4.6% on Graphics.
+
+The copy runs unchanged because the code holds no PC-relative reference to
+anything outside itself and no absolute address of itself: memory helpers
+and the three interpreter functions it needs are called at absolute
+addresses (`aot_far`), and the file is compiled with `-fno-jump-tables
+-fno-toplevel-reorder` (`scripts/aot_build_flags.py`).
+`tools/aot/check_blob.py` checks the linked firmware for exactly this, from
+the disassembly and the object file's relocation records; run it on every
+build that contains translated code.
+
+Guest memory is reached through out-of-line helpers (`mem_lget_thunk` and
+friends in `memory.cpp`) rather than the inline sequences the handlers use.
+Behind a 16 KB instruction cache the smaller code is faster: the change took
+translated code from 640 KB to 343 KB and recovered 5% on Graphics. The
+helpers finish RAM, ROM and direct-layout frame-buffer accesses themselves.
+
+Regions that the profile shows executing 16 or more instructions per entry
+keep the guest registers they use in locals (`--cache-run`).
+
+### Testing
+
+`AotSelfTest()` (`src/basilisk/aot/aot_selftest.cpp`) runs every entry point
+from randomized CPU and memory states and compares the result with the
+interpreter executing the same number of instructions from the same state:
+registers, condition codes, PC, special flags, all of guest RAM, the frame
+buffer and the stores outside both. It enters each region directly, through
+the installed opcode, from a relocated copy of the opcode, and for RAM
+modules at a different address each time, after a cache flush, and after a
+flush with one byte of the module changed.
+
+- **Host:** `test/test_aot.py` translates generated 68k code (every handler
+  the translator accepts, with and without cached registers) and runs the
+  self-test. `test/aot_host/build.sh` builds the same test for a real
+  translation.
+- **Device:** the `esp32p4_aot_selftest` profile runs it on the P4 instead of
+  starting the Mac. Translated code depends on how the compiler treats the
+  handlers' C, so the host result does not stand in for this one.
+
+### What it costs
+
+- Flash: about 0.6 MB. PSRAM: about 0.5 MB.
+- The guest can read an entry opcode where it expects an instruction, if it
+  reads code as data. Nothing in Mac OS 8 or Speedometer was seen to.
+- A guest that changes code and executes it without flushing the cache runs
+  the old code, as it could on a 68040.
+- Translation is tied to a ROM and to the system software that was profiled.
+  Other ROMs and systems fail the byte checks and are interpreted.
+- `aot_rom_generated.cpp` is a translation of Apple's ROM and system
+  software and is not part of the repository.
+
 ## Display pipeline
 
 Files: `src/basilisk/video_esp32.cpp`, `src/board/panel_surface.h`,
@@ -258,12 +403,23 @@ and Disk did not change.
 | Removing the frame-buffer store fence | No measurable change; the fence stays |
 | 64-pixel tiles | No gain over 32 |
 | A-line QuickDraw acceleration | Unsafe: Mac OS 8 replaces most QuickDraw traps and routes the ROM `Std*` procedures through private vectors; see [QUICKDRAW_REGRESSION.md](QUICKDRAW_REGRESSION.md) |
+| Dispatch loop, 55 hottest handlers and the long-word thunks in the P4's 8 KB of tightly-coupled memory | CPU 0.360, Graphics 0.266: code in TCM runs far slower than code in cached internal RAM |
+| Translated regions entered from profiler samples | Unsafe: a sampled PC can lie inside an instruction (see [Translated code](#translated-code), rule 1) |
+| Inline guest-memory access in translated code, separate entry functions | 640 KB of code; Graphics 0.80 against 0.85 for 343 KB with out-of-line helpers |
+| Hottest translated regions and a smaller handler set in internal RAM, chosen by profile | Graphics 0.925 against 0.932, and the 11 KB low internal heap was used up |
+| Whole firmware from PSRAM (`CONFIG_SPIRAM_XIP_FROM_PSRAM`) | Not measured: needs the Arduino libraries rebuilt, which failed in the build tooling. Copying only the translated code gave the gain |
 
 Earlier releases also rejected a PSRAM-resident RV32 translator, internal JIT
 arenas (blocked by the P4's write/execute protection) and a threaded trace
 cache. See the older sections of PERFORMANCE_REPORT.md.
 
 ## Maintenance checklist
+
+- **Changing `gencpu.c`, `cpuemu.cpp` or the memory helpers with translated
+  code in the build:** translate again, run `test/test_aot.py` and the host
+  self-test on the real translation, flash the `esp32p4_aot_selftest` build
+  and wait for `RESULT PASS`, run `tools/aot/check_blob.py` on the firmware
+  ELF, then measure.
 
 - **Changing `gencpu.c` or `iram_handlers.txt`:** regenerate, run
   `test_cpu_flags`, build, check internal SRAM after init, and run a

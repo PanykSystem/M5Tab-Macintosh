@@ -27,7 +27,7 @@ from release_images import TARGETS, validate_merged
 
 def create_merged_binary(source, target, env):
     """Create a merged binary after successful build."""
-    if env["PIOENV"] == "esp32p4_pioarduino_debug":
+    if env["PIOENV"] in ("esp32p4_pioarduino_debug", "esp32p4_aot_profile", "esp32p4_aot_selftest"):
         print("[MERGE] Debug firmware stays in its build directory; release images unchanged")
         return
     

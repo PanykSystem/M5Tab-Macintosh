@@ -398,6 +398,12 @@ clicks through it. It opens the desktop alias at the position of its OCR label
 but full ratings on one build ranged from 9.30 to 9.68 on Math, so compare Math
 only within one procedure.
 
+The runner starts profiling about two seconds after it starts the tests
+and, by default, stops when they report completion, so a profile also holds
+the idle desktop that follows a short test. `--profile-seconds N` stops after
+N seconds instead; with `--iterations` high enough for the tests to outlast
+it, the counters and samples cover the tests alone.
+
 `--profile HZ` samples one core with the firmware's diagnostic PERF sampler
 while the tests run (`--profile-core 0` for the display/automation core) and
 saves `perf.json` (cycles, retired instructions, 68k instruction count,
@@ -415,6 +421,16 @@ Diagnostic commands (all read-only for the guest):
 | `PERF READ offset` | Up to 24 raw samples as hex |
 | `PEEK hexaddr length` | Up to 256 bytes of guest RAM or ROM as hex |
 | `PANEL VERIFY` | Compares every physical panel pixel with the guest frame buffer's palette color (before the emulator starts: with the preboot screen, doubled) |
+| `AOT STATS` | Translated code: regions, entry points and RAM modules installed, module byte checks and rejections, guest cache flushes, size of the code and whether it runs from PSRAM, region calls and 68k instructions executed in regions |
+| `AOTPROF START` / `AOTPROF STOP` | Profiling build only: clear and start, or stop, the per-instruction execution counters |
+| `AOTPROF MAP n`, `AOTPROF READ chunk` | ROM counters: which chunks of 64 hold a count, and one chunk |
+| `AOTPROF RAMMAP n`, `AOTPROF RAMCHUNKS page`, `AOTPROF RAMREAD page chunk` | The same for code that ran in guest RAM, by 4 KB page |
+
+`tools/aot/aot_profile.py` drives the `AOTPROF` commands; see
+[tools/aot/README.md](tools/aot/README.md). Diagnostic output from other
+firmware tasks can run into a reply on the shared serial channel, so clients
+of the hex-returning commands check the length of what they read and ask
+again (`read_perf_samples`, `aot_profile.py`).
 
 `PANEL VERIFY` reads the panel through the display's scanout view, so it
 checks what is actually shown, including scaling and rotation. Run it on a

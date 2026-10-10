@@ -92,3 +92,6 @@ src/generated/
 
 # Local investigation scripts
 scratch/
+
+# Translated ROM code, generated locally from a ROM image (tools/aot)
+src/basilisk/aot/aot_rom_generated.cpp

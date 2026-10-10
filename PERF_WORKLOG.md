@@ -671,3 +671,45 @@ Math 9.431 and PR 0.765, with `PANEL VERIFY` 0/921,600.
 
 Next: merge, tag v5.0.1, publish the verified assets, and record the outcome
 in `artifacts/release-v5.0.1/release-status.json`.
+
+
+## Translated code pass — 2026-09-27/28
+
+Scope: Speedometer 4.02 Performance Rating scores toward 1.0 without a JIT.
+Branch `claude/perf-pass-2`, worktree `worktrees/perf-pass-2`, based on
+v5.0.1 `94af0b8`. Uncommitted; no push, PR or release. The attached Tab5 was
+flashed repeatedly, application only, with Austin's authorization.
+
+Result: CPU 0.804, Graphics 1.023–1.025, Disk 1.027–1.028, Math 10.48,
+PR 1.006 with ROM and system code translated; CPU 1.603–1.604, Graphics 1.012–1.014, Disk 1.024–1.030, Math 11.11–11.12, PR 1.334–1.335 (three ratings) with Speedometer's
+own code translated as well. v5.0.1 re-measured from this branch's base:
+0.804 / 0.490–0.494 / 1.031 / 9.42 / 0.764.
+
+Added: `tools/aot/` (profile reader, translator, ROM dump, relocatability
+check, test ROM generator), `src/basilisk/aot/` (runtime, generated-code
+support, execution-count profiler, differential self-test),
+`test/aot_host/` and `test/test_aot.py`, the `esp32p4_aot_profile` and
+`esp32p4_aot_selftest` profiles, `AOT STATS` and `AOTPROF` automation
+commands, `--profile-seconds` in the benchmark runner, complete memory
+helpers for translated code in `memory.cpp`, `-fwrapv`. The runner's sample
+reader now rejects replies that diagnostic output ran into.
+
+Rejected, with measurements in PERFORMANCE_REPORT.md: TCM placement,
+profile-guided internal RAM placement, whole-firmware execution from PSRAM
+through a rebuilt SDK.
+
+Side effect outside the project: the SDK rebuild attempt removed
+`~/.platformio/packages/tool-scons`; the next build reinstalled it
+(4.41101.0). It also created `~/.platformio/penv/.espidf-5.5.4`, which is
+still there and unused.
+
+Verification: 55 host tests; host and on-device differential self-tests for
+every flashed translation; `tools/aot/check_blob.py` on every firmware ELF;
+`PANEL VERIFY` clean after every set of runs; boot and Color QuickDraw
+checked. Build matrix, nothing flashed: `esp32p4_pioarduino`, `esp32p4_pioarduino_rev3` and
+`waveshare_p4_101` build with the translation and pass `check_blob.py`;
+`esp32p4_pioarduino` also builds without the generated file (empty image,
+everything interpreted); `esp32p4_aot_profile` builds.
+
+Next: Austin decides about the generated file and the profile's contents
+(WORKBOOK.md), then review and commit. Waveshare hardware has not run this.

@@ -39,6 +39,11 @@
 #include "prefs.h"
 #include "main.h"
 #include "boot_gui.h"
+#include "aot/aot_runtime.h"
+#include "aot/aot_selftest.h"
+#ifndef AOT_SELFTEST_TRIALS
+#define AOT_SELFTEST_TRIALS 6
+#endif
 
 #define DEBUG 0
 #include "debug.h"
@@ -203,6 +208,33 @@ bool InitAll(const char *vmdir)
 		ErrorAlert(STR_UNSUPPORTED_ROM_TYPE_ERR);
 		return false;
 	}
+
+#if EMULATED_68K
+#if AOT_SELFTEST
+	// Test build: compare every translated region with the interpreter on
+	// this device, report on the serial port and stop there.
+	uint8 *pristine_rom = (uint8 *)malloc(ROMSize + 64);
+	if (pristine_rom != NULL)
+		memcpy(pristine_rom, ROMBaseHost, ROMSize);
+#endif
+	// Install translated ROM code that matches the patched ROM
+	AotInstall();
+#if AOT_SELFTEST
+	AotSelfTestResult selftest = {};
+	if (pristine_rom != NULL) {
+		const AotSelfTestOptions options = {AOT_SELFTEST_TRIALS, 1, 0x10000, -1, false, false};
+		AotSelfTest(options, pristine_rom, &selftest);
+	} else {
+		selftest.failures = 1;
+	}
+	for (;;) {
+		write_log("[AOT TEST] RESULT %s runs=%u failures=%u skipped=%u instructions=%llu\n",
+		          selftest.failures ? "FAIL" : "PASS", (unsigned)selftest.runs, (unsigned)selftest.failures,
+		          (unsigned)selftest.skipped, (unsigned long long)selftest.instructions);
+		delay(2000);
+	}
+#endif
+#endif
 
 #if ENABLE_MON
 	// Initialize mon

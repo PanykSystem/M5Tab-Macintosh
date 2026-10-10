@@ -36,6 +36,8 @@
 #include "main.h"
 #include "emul_op.h"
 #include "quickdraw_accel.h"
+#include "aot/aot_runtime.h"
+#include "aot/aot_profile.h"
 
 extern int intlev(void);	// From baisilisk_glue.cpp
 
@@ -1737,7 +1739,8 @@ static inline bool native_trap_dispatch_ok(void)
 		trap_vector_checked = vector;
 		trap_vector_native = true;
 		for (unsigned i = 0; i < sizeof(kTrapDispatcher) / sizeof(kTrapDispatcher[0]); ++i) {
-			if (get_word(vector + 2 * i) != kTrapDispatcher[i]) {
+			// Entry points of translated regions replace ROM opcodes.
+			if (AotOriginalWord(vector + 2 * i) != kTrapDispatcher[i]) {
 				trap_vector_native = false;
 				break;
 			}
@@ -2033,7 +2036,37 @@ void m68k_do_execute (void)
 			if (!special_hit && batch_count > 0) {
 #endif
 
-#if CPU_TRACE_CACHE
+#if CPU_AOT_PROFILE
+			// Profiling build: count every ROM and RAM instruction dispatched.
+			while (batch_count-- > 0) {
+				uae_u32 *const counts = aot_profile_counts;
+				const uae_u32 rom_offset = (uae_u32)(regs.pc_p - ROMBaseHost);
+				if (counts != NULL && rom_offset < ROMSize) {
+					uae_u32 *const count = &counts[rom_offset >> 1];
+					if (*count != 0xffffffffu)
+						++*count;
+				} else if (aot_profile_ram_pages != NULL) {
+					const uae_u32 ram_offset = (uae_u32)(regs.pc_p - RAMBaseHost);
+					if (ram_offset < RAMSize) {
+						uae_u32 *page = aot_profile_ram_pages[ram_offset >> AOT_PROFILE_PAGE_SHIFT];
+						if (page == NULL)
+							page = AotProfileRamPage(ram_offset >> AOT_PROFILE_PAGE_SHIFT);
+						if (page != NULL) {
+							uae_u32 *const count =
+								&page[(ram_offset & ((1u << AOT_PROFILE_PAGE_SHIFT) - 1)) >> 1];
+							if (*count != 0xffffffffu)
+								++*count;
+						}
+					}
+				}
+				const uae_u32 opcode = GET_OPCODE;
+				(*tbl[opcode])(opcode);
+				if (unlikely(CPU_INNER_SPECIAL_PENDING())) {
+					special_hit = true;
+					break;
+				}
+			}
+#elif CPU_TRACE_CACHE
 			while (batch_count >= CPU_TRACE_LENGTH) {
 				const int executed = cpu_trace_execute(tbl);
 				batch_count -= executed;
@@ -2209,8 +2242,13 @@ void m68k_do_execute (void)
 #endif
 
 			// batch_count may be -1 when the scalar loop exits after final iteration.
+			// A translated region runs many instructions in one dispatch.
 			const int instructions_executed =
-				EXEC_BATCH_SIZE - ((batch_count > 0) ? batch_count : 0);
+				EXEC_BATCH_SIZE - ((batch_count > 0) ? batch_count : 0) + aot_extra_instructions;
+			AotAccount(aot_extra_instructions);
+			aot_extra_instructions = 0;
+			// Translated RAM code is installed where it is seen running.
+			AotRamSample();
 
 #if CPU_CORE_PROFILE
 			cpu_prof_batches++;

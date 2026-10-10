@@ -9,6 +9,7 @@
  */
 
 #include "sysdeps.h"
+#include "aot/aot_runtime.h"
 
 #include "board_config.h"
 #include "board_display.h"
@@ -358,12 +359,11 @@ void B2_delete_mutex(B2_mutex *mutex)
     delete mutex;
 }
 
-/* Flush data-only threaded traces when Mac OS patches executable memory. */
+/* The emulator changed guest memory that may hold code. */
 void FlushCodeCache(void *start, uint32 size)
 {
-    UNUSED(start);
-    UNUSED(size);
     FlushCPUTraceCache();
+    AotCodeChangedRange((uint8 *)start, size);
 }
 
 /*

@@ -30,6 +30,8 @@
 #include "preboot_ui.h"
 #include "quickdraw_accel.h"
 #include "perf_sampler.h"
+#include "aot/aot_profile.h"
+#include "aot/aot_runtime.h"
 #include "video.h"
 
 #include "board_config.h"
@@ -1132,6 +1134,113 @@ static void processLegacyCommand(char *command)
             response[used++] = hex[bytes[i] & 0x0f];
         }
         response[used] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (strcmp(command, "AOT STATS") == 0) {
+        extern uint64_t EmulatorInstructionCount(void);
+        AotStats stats;
+        AotReadStats(&stats);
+        protocolReply("@B2 OK AOT STATS regions=%lu/%lu entries=%lu/%lu modules=%lu/%lu installs=%lu "
+                      "checks=%lu rejects=%lu flushes=%lu code=%lu psram=%lu calls=%llu instructions=%llu "
+                      "total=%llu\n",
+                      (unsigned long)stats.regions_installed, (unsigned long)stats.regions_total,
+                      (unsigned long)stats.entries_installed, (unsigned long)stats.entries_total,
+                      (unsigned long)stats.modules_installed, (unsigned long)stats.modules_total,
+                      (unsigned long)stats.module_installs, (unsigned long)stats.module_checks,
+                      (unsigned long)stats.module_rejects, (unsigned long)stats.flushes,
+                      (unsigned long)stats.code_bytes, (unsigned long)stats.code_in_psram,
+                      (unsigned long long)stats.calls, (unsigned long long)stats.instructions,
+                      (unsigned long long)EmulatorInstructionCount());
+        return;
+    }
+    if (strcmp(command, "AOTPROF START") == 0) {
+        if (AotProfileStart()) {
+            protocolReply("@B2 OK AOTPROF START chunks=%lu\n", (unsigned long)AotProfileChunks());
+        } else {
+            protocolReply("@B2 ERR AOTPROF unavailable\n");
+        }
+        return;
+    }
+    if (strcmp(command, "AOTPROF STOP") == 0) {
+        AotProfileStop();
+        protocolReply("@B2 OK AOTPROF STOP chunks=%lu\n", (unsigned long)AotProfileChunks());
+        return;
+    }
+    unsigned long profile_chunk = 0;
+    if (sscanf(command, "AOTPROF MAP %lu", &profile_chunk) == 1) {
+        // Which chunks of counters hold anything, 1024 chunks a reply.
+        static const char hex[] = "0123456789ABCDEF";
+        uint8_t bitmap[128];
+        const uint32_t used = AotProfileMap((uint32_t)profile_chunk, bitmap, sizeof(bitmap));
+        char response[320];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF MAP %lu ", profile_chunk);
+        for (uint32_t i = 0; i < used; ++i) {
+            response[length++] = hex[bitmap[i] >> 4];
+            response[length++] = hex[bitmap[i] & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (sscanf(command, "AOTPROF READ %lu", &profile_chunk) == 1) {
+        static const char hex[] = "0123456789ABCDEF";
+        uint32_t counts[AOT_PROFILE_CHUNK];
+        if (!AotProfileRead((uint32_t)profile_chunk, counts)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+            return;
+        }
+        char response[64 + AOT_PROFILE_CHUNK * 8];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF READ %lu ", profile_chunk);
+        for (int i = 0; i < AOT_PROFILE_CHUNK; ++i) {
+            for (int shift = 28; shift >= 0; shift -= 4)
+                response[length++] = hex[(counts[i] >> shift) & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    unsigned long profile_page = 0;
+    if (sscanf(command, "AOTPROF RAMMAP %lu", &profile_page) == 1) {
+        // Which 4 KB pages of guest RAM ran code, 1024 pages a reply.
+        static const char hex[] = "0123456789ABCDEF";
+        uint8_t bitmap[128];
+        const uint32_t used = AotProfileRamMap((uint32_t)profile_page, bitmap, sizeof(bitmap));
+        char response[320];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF RAMMAP %lu %lu ", profile_page,
+                              (unsigned long)aot_profile_ram_page_count);
+        for (uint32_t i = 0; i < used; ++i) {
+            response[length++] = hex[bitmap[i] >> 4];
+            response[length++] = hex[bitmap[i] & 0x0f];
+        }
+        response[length] = '\0';
+        protocolReply("@B2 %s\n", response + 4);
+        return;
+    }
+    if (sscanf(command, "AOTPROF RAMCHUNKS %lu", &profile_page) == 1) {
+        uint32_t bits = 0;
+        if (!AotProfileRamChunks((uint32_t)profile_page, &bits)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+        } else {
+            protocolReply("@B2 OK AOTPROF RAMCHUNKS %lu %08lX\n", profile_page, (unsigned long)bits);
+        }
+        return;
+    }
+    if (sscanf(command, "AOTPROF RAMREAD %lu %lu", &profile_page, &profile_chunk) == 2) {
+        static const char hex[] = "0123456789ABCDEF";
+        uint32_t counts[AOT_PROFILE_CHUNK];
+        if (!AotProfileRamRead((uint32_t)profile_page, (uint32_t)profile_chunk, counts)) {
+            protocolReply("@B2 ERR AOTPROF range\n");
+            return;
+        }
+        char response[64 + AOT_PROFILE_CHUNK * 8];
+        int length = snprintf(response, sizeof(response), "@B2 OK AOTPROF RAMREAD %lu %lu ", profile_page,
+                              profile_chunk);
+        for (int i = 0; i < AOT_PROFILE_CHUNK; ++i) {
+            for (int shift = 28; shift >= 0; shift -= 4)
+                response[length++] = hex[(counts[i] >> shift) & 0x0f];
+        }
+        response[length] = '\0';
         protocolReply("@B2 %s\n", response + 4);
         return;
     }

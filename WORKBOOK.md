@@ -124,6 +124,69 @@ Settings screen, settings unchanged. Its previous application (the AOT
 Next: Austin reviews the screens on the device; commit/PR on his approval;
 rebuild release images so they carry the real font.
 
+## Translated code pass — 2026-09-27/28
+
+Austin asked for every Speedometer 4.02 Performance Rating score near or
+above 1.0, without a JIT, and authorized flashing the attached Tab5. Work is
+on branch `claude/perf-pass-2` (`worktrees/perf-pass-2`), based on v5.0.1
+`94af0b8`. It is uncommitted, not pushed, and nothing was released. The
+control checkout's paused JIT work on `codex/rv32-jit` was not touched; its
+uncommitted edits to this file and to PERF_WORKLOG.md are not in this branch
+and have to be merged by whoever integrates.
+
+| | CPU | Graphics | Disk | Math | PR |
+|---|---:|---:|---:|---:|---:|
+| v5.0.1 | 0.804 | 0.490–0.494 | 1.031 | 9.42 | 0.764 |
+| ROM and system code translated | 0.804 | 1.023–1.025 | 1.027–1.028 | 10.48 | 1.006 |
+| Also Speedometer's own code | 1.603–1.604 | 1.012–1.014 | 1.024–1.030 | 11.11–11.12 | 1.334–1.335 |
+
+Hot 68k code is translated to C++ at build time from the interpreter's own
+handler bodies and entered through patched opcodes; nothing is generated at
+run time. ROM regions are checked against the ROM at start-up. System and
+application code in RAM is translated as position-independent modules,
+installed where it is seen running and checked again after every guest cache
+flush. The translated code runs from PSRAM. Design and rules:
+[EMULATOR_PERFORMANCE.md](EMULATOR_PERFORMANCE.md#translated-code).
+Measurements and rejected experiments:
+[PERFORMANCE_REPORT.md](PERFORMANCE_REPORT.md). Procedure:
+[tools/aot/README.md](tools/aot/README.md).
+
+The CPU test is a sort loop in Speedometer itself. It moves only when that
+loop is in the profile, so the middle row is what an unprofiled program
+gets.
+
+Verification: 55 host tests. Every translation passed the differential
+self-test on the host and, built by the firmware toolchain, on the Tab5
+(for the flashed image: 27,526 runs, 92.1 million instructions compared, no
+mismatch, 57 trials skipped because they overwrote the code under test).
+`PANEL VERIFY` 0/921,600 after every set of runs. Cold boot to Finder 49.6 s
+(5.0.1: 49.5 s). Color QuickDraw monochrome 1.001, 8-bit 0.868 (5.0.1: 0.549
+and 0.509).
+
+Device state: the Tab5 runs the last row's image, `full-23`
+(`artifacts/perf-pass-2/builds/full-23.bin`, debug profile, SHA-256
+`2feab40d3f4168d72d9be071e8a0866f3abeec5d4a9cd9e16edafd01b07c0978`).
+Only the application at 0x10000 was
+written; bootloader, partition table, NVS, settings and the SD image were
+not. To go back, flash
+`artifacts/release-v5.0.1/debug-components/firmware.bin` at 0x10000.
+
+Open points for Austin:
+
+- `src/basilisk/aot/aot_rom_generated.cpp` is a translation of Apple's ROM
+  and system software. It is git-ignored. Firmware built with it contains
+  that translation; decide before publishing such a build.
+- Whether the shipped profile should include Speedometer's own code.
+- Waveshare and Rev3 hardware have not run this; their profiles build and
+  pass `check_blob.py`. The Tab5 release profile (`esp32p4_pioarduino`) was
+  built but not flashed: every measurement is of the debug profile.
+- The repository's ESP-IDF project files (`CMakeLists.txt`, `main/`) list
+  sources that no longer exist. They stopped an attempt to rebuild the SDK
+  and are otherwise unused.
+
+Evidence, every flashed image with its ELF and patch, profiles and scripts:
+control checkout, `artifacts/perf-pass-2/` (`NOTES.md` is the index).
+
 ## v5.0.1 Performance release — 2026-09-27
 
 Austin asked to raise Speedometer 4.02 Performance Rating CPU and Graphics

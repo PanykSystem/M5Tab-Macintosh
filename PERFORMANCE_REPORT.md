@@ -1,5 +1,105 @@
 # M5Tab Macintosh performance optimization report
 
+## Translated code pass — 2026-09-27/28
+
+Branch `claude/perf-pass-2`, based on v5.0.1 `94af0b8`. The goal was every
+Speedometer 4.02 Performance Rating score near or above 1.0, without a JIT.
+[EMULATOR_PERFORMANCE.md](EMULATOR_PERFORMANCE.md#translated-code) explains
+the design; [tools/aot/README.md](tools/aot/README.md) is the procedure.
+Measured on the Tab5 (ESP32-P4 rev 1.3, 360 MHz, Mac OS 8, 16 MB guest RAM).
+
+| Metric | v5.0.1 | ROM and system code translated | Also Speedometer's own code |
+|---|---:|---:|---:|
+| CPU | 0.804 | 0.804 | 1.603–1.604 |
+| Graphics | 0.490–0.494 | 1.023–1.025 | 1.012–1.014 |
+| Disk | 1.031 | 1.027–1.028 | 1.024–1.030 |
+| Math | 9.42 | 10.48 | 11.11–11.12 |
+| PR | 0.764 | 1.006 | 1.334–1.335 |
+
+v5.0.1 was re-measured from this branch's base. The middle column is what a
+program that was never profiled gets. The CPU test is a sort loop in
+Speedometer's own code and runs no ROM or system code; it moves only when
+that loop is translated, as in the last column.
+
+### Where the time went
+
+The profile of 5.0.1 is flat: about 6,000 hot 68k addresses, no handler above
+3.6%, 42 host instructions and 60 to 64 cycles for every 68k instruction.
+Two thirds of that is work the interpreter repeats each time an instruction
+runs: dispatch, decoding, every condition code, the PC. For code whose bytes
+are known beforehand it can be done at build time.
+
+Measured with `--profile-seconds`, which keeps the idle desktop out of the
+counters, the Graphics test went from 6.1 to 11.4 68k MIPS, from 41 to 18
+host instructions and from 59 to 32 cycles per 68k instruction. Counted from
+start-up through the boot, the ratings and the Color tests, 84% of all 68k
+instructions ran in translated code with ROM and system code translated and
+90% with Speedometer's own code as well.
+
+### Steps, in the order they were measured
+
+| Build | Change | CPU | Graphics |
+|---|---|---:|---:|
+| base-00 | v5.0.1 source | 0.804 | 0.490–0.494 |
+| aot-06 | Hot ROM code translated at build time, entered through patched opcodes | 0.805 | 0.838 |
+| aot-11 | Hot system code in RAM translated as position-independent modules | 0.805 | 0.804 |
+| aot-13 | Compact code: memory helpers out of line, entries merged into regions, shared exits (640 KB to 343 KB) | 0.804 | 0.847 |
+| aot-14 | Full-format addressing translated; instruction lengths inferred from the counts, which frees entry points | 0.805 | 0.932 |
+| aot-17 | Lower thresholds, regions from two instructions, cheaper entry number | 0.805 | 0.941 |
+| aot-18 | Guest registers in locals in regions that run 16 or more instructions per entry | 0.805 | 0.948 |
+| aot-20 | Translated code copied to PSRAM at start-up and run there | 0.806 | 0.992 |
+| aot-21 | ROM and frame-buffer accesses finished inside the memory helpers | 0.806 | 1.020 |
+| sys-22 | Profile extended with the Color tests and Finder use | 0.804 | 1.023–1.025 |
+| full-23 | sys-22 with the application code of the profile translated too | 1.603–1.604 | 1.012–1.014 |
+
+Every build from aot-06 to sys-22 leaves Speedometer's own code to the
+interpreter except aot-10 (CPU 2.000, Graphics 0.798), which showed what the
+CPU test is. full-23 translates the same loop and reaches 1.60, not 2.00;
+why the later translator does less well on it was not investigated.
+
+Measured and rejected: the dispatch loop and hottest handlers in the P4's
+tightly-coupled memory (CPU 0.360); profile-guided placement of translated
+regions in internal RAM (Graphics 0.925 against 0.932, and the low internal
+heap was used up); running the whole firmware from PSRAM through a rebuilt
+SDK (the rebuild failed in the build tooling; copying only the translated
+code is what aot-20 does).
+
+### Safety
+
+- **Same semantics by construction.** Region bodies are the interpreter's
+  handler bodies. What the translator adds (branches, entries, exits,
+  register and flag locals) is what the differential test is for.
+- **Differential test.** Every entry point, from random states, against the
+  interpreter: 27,526 runs and 92.1 million instructions compared on the
+  device for the build that is flashed (57 trials skipped because they
+  overwrote the code under test), the
+  same test on the host for every translation, and `test/test_aot.py` on
+  generated code for every handler the translator accepts. No mismatch
+  remains. The ones found on the way were a translator bug (register use of
+  `MOVE16` and `CAS2` when caching registers), signed overflow in the
+  handlers that the compiler exploited once operands were constants
+  (`-fwrapv`), and four cases where the test itself compared unlike things.
+- **Byte checks.** A ROM region is installed only if the ROM holds the bytes
+  it was translated from. A RAM module is installed only where its code is
+  executing and matches byte for byte, and is compared again after every
+  guest cache flush.
+- **Display.** `PANEL VERIFY` found 0 of 921,600 pixels wrong after every
+  set of runs. Color QuickDraw completed in monochrome and 8-bit colour.
+- **No boot regression.** 49.6 to 49.7 s to the Finder against 49.5 s.
+
+### Limits
+
+- The translation is tied to the Quadra 650 ROM and to the Mac OS 8 system
+  on the test disk. Anything else fails the byte checks and is interpreted at
+  5.0.1 speed.
+- `aot_rom_generated.cpp` is derived from Apple's ROM and system software. It
+  is not in the repository, and a build without it interprets everything.
+- Guest code that reads instructions as data can see an entry opcode.
+- Only the Tab5 ran this. The Waveshare boards build the same code.
+- Internal RAM is unchanged from 5.0.1. PSRAM use grows by the size of the
+  translated code, 0.7 MB.
+
+
 ## v5.0.1 interpreter and display pass — 2026-09-27
 
 Released as v5.0.1 from branch `claude/speedometer-perf`, based on v5.0

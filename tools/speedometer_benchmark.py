@@ -576,12 +576,25 @@ def read_perf_samples(control: MacControl, run_dir: Path) -> dict[str, str]:
     fields = dict(item.split("=", 1) for item in state.split()[4:])
     count = int(fields["count"])
     blob = bytearray()
+    failures = 0
     while len(blob) // 16 < count:
         reply = control.request(f"PERF READ {len(blob) // 16}", "OK PERF READ", timeout=15.0)
         parts = reply.split()
-        if int(parts[5]) == 0:
+        # Diagnostic output from other firmware tasks can run into a reply;
+        # ask again rather than store a damaged record.
+        try:
+            samples = int(parts[5])
+            data = bytes.fromhex(parts[6]) if samples else b""
+            if int(parts[4]) != len(blob) // 16 or len(data) != samples * 16:
+                raise ValueError(reply)
+        except (IndexError, ValueError):
+            failures += 1
+            if failures > 20:
+                raise
+            continue
+        if samples == 0:
             break
-        blob += bytes.fromhex(parts[6])
+        blob += data
     (run_dir / "perf-samples.bin").write_bytes(bytes(blob))
     (run_dir / "perf.json").write_text(json.dumps(fields, indent=2, sort_keys=True) + "\n")
     return fields
@@ -646,6 +659,11 @@ def run_rating(control: MacControl, run_dir: Path, args: argparse.Namespace) -> 
             pass
         control.request(f"PERF START {args.profile} {args.profile_capacity} {args.profile_core}",
                         "OK PERF START", timeout=15.0)
+        if args.profile_seconds:
+            # Profile only the start of the run, so that the counters cover
+            # the tests and not the idle desktop after them.
+            time.sleep(args.profile_seconds)
+            control.request("PERF STOP", "OK PERF STOP", timeout=15.0)
 
     started = time.monotonic()
     deadline = started + args.benchmark_timeout
@@ -665,7 +683,7 @@ def run_rating(control: MacControl, run_dir: Path, args: argparse.Namespace) -> 
             break
         handle_suite_dialog(control, text)
     elapsed = time.monotonic() - started
-    if args.profile:
+    if args.profile and not args.profile_seconds:
         control.request("PERF STOP", "OK PERF STOP", timeout=15.0)
     retry_control("close tests-complete dialog", lambda: control.click(320, 153))
     time.sleep(1.5)
@@ -842,6 +860,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profile", type=int, default=0, metavar="HZ",
                         help="rating suite: sample with the firmware PERF sampler")
     parser.add_argument("--profile-core", type=int, default=1, choices=(0, 1))
+    parser.add_argument("--profile-seconds", type=float, default=0.0,
+                        help="stop profiling this long after it starts instead of when the tests finish; "
+                             "use with --iterations so that the tests outlast it")
     parser.add_argument("--profile-capacity", type=int, default=200000)
     parser.add_argument(
         "--output-root",
