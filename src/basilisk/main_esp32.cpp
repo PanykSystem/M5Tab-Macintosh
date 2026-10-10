@@ -480,11 +480,12 @@ static bool AllocateRAM(void)
         RAMSize = 8 * 1024 * 1024;  // Default 8MB
     }
 
-    // The ROM, emulator tables, translated code and runtime buffers need
-    // PSRAM after guest RAM; at 24 MB about 4 MB of this stays free. If the
-    // chosen size would not leave it (another board, or fragmentation), step
-    // down instead of failing to start.
-    const uint32 kPsramAfterRAM = 6 * 1024 * 1024;
+    // After guest RAM, startup keeps about 2.8 MB of PSRAM (ROM, tables,
+    // translated code) and briefly needs 1 MB more for the decode table; the
+    // rest is runtime headroom. On the Tab5, 24 MB leaves 6.2 MB here. If the
+    // chosen size would not leave this much (another board, or
+    // fragmentation), step down instead of failing to start.
+    const uint32 kPsramAfterRAM = 5 * 1024 * 1024;
     const uint32 kRAMStep = 4 * 1024 * 1024;
     const uint32 requested = RAMSize;
     const size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
