@@ -81,6 +81,11 @@ class BootControlTests(unittest.TestCase):
                          {'checked': 921600, 'mismatched': 3, 'first': [10, 20]})
         self.client.request.return_value = '@B2 OK PANEL checked=9'
         with self.assertRaises(mc.ControlError): self.client.panel_verify()
+        self.client.request.side_effect = ['@B2 OK PANEL checked=921600 mismatched=0 first=-',
+                                           '@B2 OK PANEL checked=921600 mismatched=0 first=-1,-1']
+        self.assertEqual(self.client.panel_verify(),
+                         {'checked': 921600, 'mismatched': 0, 'first': [-1, -1]})
+        self.client.request.side_effect = None
         tools = {tool['name'] for tool in mc.MCP_TOOLS}
         self.assertTrue({'mac_touch', 'mac_boot_hit', 'mac_panel_verify', 'mac_screenshot_panel'} <= tools)
         args = mc.build_parser().parse_args(['touch', 'tap', '5', '6', '--hold', '90'])

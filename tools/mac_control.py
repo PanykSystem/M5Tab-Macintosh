@@ -563,14 +563,18 @@ class MacControl:
 
     def panel_verify(self) -> dict[str, Any]:
         """Compare the panel with the frame it should show (guest or preboot)."""
-        line = self.request("PANEL VERIFY", "OK PANEL", timeout=30.0)
-        fields = dict(part.split("=", 1) for part in line.split()[3:] if "=" in part)
-        try:
-            first_x, first_y = (int(v) for v in fields["first"].split(","))
-            return {"checked": int(fields["checked"]), "mismatched": int(fields["mismatched"]),
-                    "first": [first_x, first_y]}
-        except (KeyError, ValueError) as exc:
-            raise ControlError("invalid PANEL VERIFY response") from exc
+        # Diagnostic output from another firmware task can cut into the reply
+        # line; the check is read-only, so ask again.
+        for attempt in range(3):
+            line = self.request("PANEL VERIFY", "OK PANEL", timeout=30.0)
+            fields = dict(part.split("=", 1) for part in line.split()[3:] if "=" in part)
+            try:
+                first_x, first_y = (int(v) for v in fields["first"].split(","))
+                return {"checked": int(fields["checked"]), "mismatched": int(fields["mismatched"]),
+                        "first": [first_x, first_y]}
+            except (KeyError, ValueError) as exc:
+                error = exc
+        raise ControlError("invalid PANEL VERIFY response") from error
 
     def touch(self, action: str, x: int | None = None, y: int | None = None,
               hold_ms: int | None = None) -> None:
