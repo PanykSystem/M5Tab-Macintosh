@@ -38,10 +38,6 @@
 #include "automation.h"
 #include "boot_gui.h"
 
-#if USE_RV32_JIT
-#include "jit_compiler.h"
-#endif
-
 #define DEBUG 1
 #include "debug.h"
 
@@ -143,9 +139,6 @@ static void reportIPSStats(uint32 current_time)
         if (!AutomationSerialCaptureActive()) {
             reportCPUCorePerf(current_time);
             reportIRQProfile(current_time);
-#if USE_RV32_JIT
-            jit_report_stats(current_time);
-#endif
         }
     }
 }
@@ -600,14 +593,6 @@ static bool InitEmulator(void)
         return false;
     }
 
-#if USE_RV32_JIT
-    // Initialize after the emulator's long-lived allocations so the JIT can
-    // use PSRAM XIP without displacing hot interpreter tables from SRAM.
-    if (jit_init() < 0) {
-        Serial.println("[MAIN] WARNING: JIT init failed - continuing with interpreter");
-    }
-#endif
-    
     // Start 60Hz FreeRTOS timer
     if (!start60HzTimer()) {
         // Non-fatal - will fall back to polling

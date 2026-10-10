@@ -7,8 +7,8 @@ work since 5.0.1, push it, merge it into master and release it as 5.1. He
 chose the translated code with ROM and system code only (not Speedometer's
 own code). He asked for testing, with any issues fixed, before release. He
 also chose to publish all four board images, with Waveshare and Rev3 noted as
-build-validated only. The paused JIT is not included: it remains uncommitted
-on `codex/rv32-jit` in the control checkout, with `JIT_WORKLOG.md` there.
+build-validated only. The paused JIT is not included. Austin later dropped
+it for good (see the guest RAM section above).
 
 Integration branch: `claude/release-v5.1`, in session worktree
 `.claude/worktrees/jolly-hertz-2b45fc`, based on v5.0.1 `94af0b8`:
