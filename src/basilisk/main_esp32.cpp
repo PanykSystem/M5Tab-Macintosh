@@ -409,6 +409,9 @@ void QuitEmulator(void)
 {
     Serial.println("[MAIN] QuitEmulator called");
     emulator_running = false;
+    // Upstream exits here. Stop the CPU instead so Start680x0() returns and
+    // basilisk_setup() can shut down and show the power-off screen.
+    m68k_request_quit();
 }
 
 /*

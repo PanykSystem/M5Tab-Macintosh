@@ -1,5 +1,62 @@
 # M5Tab-Macintosh workbook
 
+## Shut Down panic fix — 2026-10-09
+
+Austin reported that Special > Shut Down on v5.0.1 (and `claude/preboot-ui`)
+printed `QuitEmulator called`, then panicked with a NULL load in
+`m68k_do_execute()`. The device rebooted into recovery settings, so the
+"safe to switch off" screen never appeared. The work is on branch
+`claude/jolly-hertz-2b45fc` (session worktree
+`.claude/worktrees/jolly-hertz-2b45fc`), based on v5.0.1 `94af0b8`.
+
+Cause: upstream `QuitEmulator()` exits the process. This port's version only
+cleared `emulator_running`, which the CPU never reads, so execution continued
+after the EMUL_OP. PowerOff (Q650 ROM+0x9E16) is patched by overwriting only
+the first word of `BSR.W` with `EMUL_OP_SHUTDOWN`. The CPU therefore decoded
+the displacement word and then `JMP (-8,PC,A0.L)` into unmapped memory, where
+the dummy bank returns a NULL `pc_p`. The panic registers held fragments of
+`default_xlate()`'s message. The bug has been present since at least v3.4.2
+and is not a 5.0.1 regression. Polling once per 8 instructions only means that
+setting BRK alone would also stop the CPU too late.
+
+Fix: `QuitEmulator()` calls `m68k_request_quit()`, which sets a sticky request
+and BRK. `m68k_emulop()` then parks the PC on two host-side `EXEC_RETURN`
+opcodes, so the rest of the dispatch batch does nothing. `m68k_do_specialties()`
+returns before any trace, interrupt or STOP handling, and `m68k_execute()`
+returns at every nesting level. The inner dispatch loop and the opcode handlers
+are unchanged.
+
+Tab5 verification (debug app, flashed app-only at 0x10000 with a matching
+readback):
+
+- Shut Down: the CPU stopped in the same millisecond as the quit, and teardown
+  took 0.2 s. Boot status reported `stopped`, and no panic occurred within
+  45 s. A protocol-5 panel readback (fix plus the preboot-ui automation patch)
+  showed "It is now safe to switch off your Macintosh."
+- The next boot reached Finder with no improper-shutdown alert.
+- Restart showed Welcome, then Starting Up, then Finder, without calling
+  `QuitEmulator`.
+- Speedometer Performance Rating, 3 runs each:
+
+| | CPU | Graphics | Disk | Math | PR |
+|---|---:|---:|---:|---:|---:|
+| v5.0.1 release debug app | 0.804 | 0.495–0.496 | 0.997–1.031 | 9.435–9.478 | 0.762–0.765 |
+| Fix | 0.803 | 0.495–0.497 | 1.030–1.034 | 9.412–9.419 | 0.764–0.766 |
+
+The Performance Rating did not regress. CPU (one display unit) and Math
+(about 0.3%) are slightly lower, although no hot path changed. The only new
+work is one flag test per EMUL_OP and per specialty call.
+
+Evidence is in this worktree's ignored `artifacts/shutdown-quit/` (test
+driver, images, serial logs, screenshots, ratings). The Tab5 runs the final
+debug app `705c8a5e…`, whose code sections are identical to the tested
+`bd7a5c2d…`; only `__TIME__` strings differ. The previous application (the
+preboot-ui protocol-5 build) is backed up as
+`artifacts/shutdown-quit/hardware/app-partition-before.bin` (SHA256
+`5a862ad0…`). Next: Austin's review. Pushing, opening a PR and releasing all
+need his approval. `claude/preboot-ui` needs this fix before its own Shut Down
+test.
+
 ## v5.0.1 Performance release — 2026-09-27
 
 Austin asked to raise Speedometer 4.02 Performance Rating CPU and Graphics
