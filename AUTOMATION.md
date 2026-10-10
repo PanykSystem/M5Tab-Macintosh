@@ -420,6 +420,7 @@ Diagnostic commands (all read-only for the guest):
 | `PERF STATE` | Counters for the last window and sample count |
 | `PERF READ offset` | Up to 24 raw samples as hex |
 | `PEEK hexaddr length` | Up to 256 bytes of guest RAM or ROM as hex |
+| `MEM` | PSRAM free now, its largest free block and the lowest free since boot; internal SRAM free |
 | `PANEL VERIFY` | Compares every physical panel pixel with the guest frame buffer's palette color (before the emulator starts: with the preboot screen, doubled) |
 | `AOT STATS` | Translated code: regions, entry points and RAM modules installed, module byte checks and rejections, guest cache flushes, size of the code and whether it runs from PSRAM, region calls and 68k instructions executed in regions |
 | `AOTPROF START` / `AOTPROF STOP` | Profiling build only: clear and start, or stop, the per-instruction execution counters |

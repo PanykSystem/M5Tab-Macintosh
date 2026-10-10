@@ -884,6 +884,15 @@ static void processLegacyCommand(char *command)
         }
         return;
     }
+    if (strcmp(command, "MEM") == 0) {
+        // PSRAM headroom beside guest RAM; min is the lowest free since boot.
+        protocolReply("@B2 OK MEM psram_free=%u psram_largest=%u psram_min=%u internal_free=%u\n",
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                      (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM),
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        return;
+    }
     if (strcmp(command, "NET") == 0) {
         int wifi_status = WL_IDLE_STATUS;
         char ip[16];
