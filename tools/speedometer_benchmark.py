@@ -685,11 +685,17 @@ def run_rating(control: MacControl, run_dir: Path, args: argparse.Namespace) -> 
     elapsed = time.monotonic() - started
     if args.profile and not args.profile_seconds:
         control.request("PERF STOP", "OK PERF STOP", timeout=15.0)
-    retry_control("close tests-complete dialog", lambda: control.click(320, 153))
-    time.sleep(1.5)
-    control.move(560, 330)
-    result_image = capture(control, run_dir / "result.png", color=True)
-    records = run_ocr(result_image)
+    # A click that lands while the alert is still appearing is ignored, and a
+    # dialog left open makes the next run wait for a Finder that never shows.
+    for attempt in range(3):
+        retry_control("close tests-complete dialog", lambda: control.click(320, 153))
+        time.sleep(1.5)
+        control.move(560, 330)
+        result_image = capture(control, run_dir / "result.png", color=True)
+        records = run_ocr(result_image)
+        if "tests are done" not in recognized_text(records).lower():
+            break
+        print("Tests-complete dialog still open; clicking OK again", flush=True)
     scores = {
         label.lower(): _number_right_of(records, pattern)
         for label, pattern in (("CPU", r"CPU:?"), ("Graphics", r"Graphics:?"),
