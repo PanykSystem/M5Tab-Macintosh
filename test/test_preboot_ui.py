@@ -32,6 +32,7 @@ class PrebootUITests(unittest.TestCase):
                 "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
                 f"-D{board}=1", "-I", str(ROOT / "test/display_stubs"),
                 "-I", str(ROOT / "src/board"), "-I", str(ROOT / "src/basilisk"),
+                "-I", str(ROOT / "src/basilisk/include"),
                 "-I", str(ROOT / "src/generated"),
                 str(ROOT / "test/test_preboot_ui.cpp"),
                 str(ROOT / "src/basilisk/preboot_ui.cpp"),

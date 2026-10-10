@@ -29,7 +29,7 @@ class BootControlTests(unittest.TestCase):
         self.assertEqual(self.client.request.call_args.args[0], 'BOOT SET cdrom -')
 
     def test_settings_validate_before_writing(self):
-        for key, value in [('ramsize', '8junk'), ('ramsize', 32), ('rotation', 90),
+        for key, value in [('ramsize', '8junk'), ('ramsize', 32), ('ramsize', 12), ('rotation', 90),
                            ('audio', 'yes'), ('audio', 1), ('wifi_ssid', 'é' * 17),
                            ('wifi_pass', 'x' * 64), ('disk', '/x\ny'),
                            ('wifi_pass', '\x00'), ('wifi_password_set', True)]:
@@ -38,6 +38,8 @@ class BootControlTests(unittest.TestCase):
         self.client.request.assert_not_called()
         self.client.boot_set('audio', False)
         self.assertEqual(self.client.request.call_args.args[0], 'BOOT SET audio 66616c7365')
+        self.client.boot_set('ramsize', 24)
+        self.assertEqual(self.client.request.call_args.args[0], 'BOOT SET ramsize 3234')
 
     def test_get_typed_values_and_password_redaction(self):
         self.client.request.return_value = '@B2 OK BOOT VALUE audio 74727565'
@@ -144,6 +146,7 @@ class BootControlTests(unittest.TestCase):
         code = r'''
 #include "boot_control_values.h"
 #include <cassert>
+#include <cstdio>
 #include <cstring>
 int main() {
     char out[4]; bool b = false; int n = 0;
@@ -153,9 +156,20 @@ int main() {
         assert(!BootControlDecode(s, out, sizeof(out)));
     assert(BootControlBool("true", &b) && b);
     assert(!BootControlBool("True", &b));
-    assert(BootControlChoice("16", true, &n) && n == 16);
+    for (int mb : {8, 16, 20, 24}) {
+        char text[4]; snprintf(text, sizeof(text), "%d", mb);
+        assert(BootControlChoice(text, true, &n) && n == mb);
+    }
     assert(BootControlChoice("180", false, &n) && n == 180);
-    for (auto s : {"", "8x", "08", "-8", " 8", "32"}) assert(!BootControlChoice(s, true, &n));
+    assert(BootControlChoice("0", false, &n) && n == 0);
+    for (auto s : {"", "8x", "08", "-8", " 8", "32", "4", "12", "0", "99999999999"})
+        assert(!BootControlChoice(s, true, &n));
+    assert(!BootControlChoice("24", false, &n));
+    // Sizes saved by older firmware round up; garbage gets the default.
+    assert(BootControlSavedRam(4) == 8 && BootControlSavedRam(8) == 8);
+    assert(BootControlSavedRam(12) == 16 && BootControlSavedRam(16) == 16);
+    assert(BootControlSavedRam(24) == 24 && BootControlSavedRam(64) == 24);
+    assert(BootControlSavedRam(0) == kBootRamDefaultMB && BootControlSavedRam(-4) == kBootRamDefaultMB);
 }
 '''
         with tempfile.TemporaryDirectory() as temp:

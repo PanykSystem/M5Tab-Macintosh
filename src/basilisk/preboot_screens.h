@@ -44,7 +44,7 @@ int ListClampFirst(const ListGeometry &list, int first, int count);
 enum SettingsControl {
     kNoControl = -1,
     kDiskList, kCDList, kFolderList,
-    kRam4, kRam8, kRam12, kRam16,
+    kRamFirst, kRamLast = kRamFirst + 3,   /* one radio per kBootRamChoicesMB entry */
     kSoundBox, kBootCDBox, kRotateBox,
     kWiFiButton, kUsbButton, kStartButton,
     kSettingsControlCount

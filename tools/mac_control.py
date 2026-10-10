@@ -33,7 +33,7 @@ SCREENSHOT_READ_SIZE = 768
 MAX_PROTOCOL_LINE = 4096
 BOOT_STRING_SETTINGS = {"disk": 255, "cdrom": 255, "extfs": 255, "wifi_ssid": 32, "wifi_pass": 63}
 BOOT_BOOL_SETTINGS = {"skip_gui", "wifi_auto", "audio", "boot_from_cd", "wifi_password_set"}
-BOOT_INT_SETTINGS = {"ramsize": (4, 8, 12, 16), "rotation": (0, 180)}
+BOOT_INT_SETTINGS = {"ramsize": (8, 16, 20, 24), "rotation": (0, 180)}
 BOOT_READ_SETTINGS = tuple(k for k in BOOT_STRING_SETTINGS if k != "wifi_pass") + ("ramsize", "rotation", "skip_gui", "wifi_auto", "audio", "boot_from_cd", "wifi_password_set")
 BOOT_WRITE_SETTINGS = tuple(BOOT_STRING_SETTINGS) + tuple(BOOT_INT_SETTINGS) + ("skip_gui", "wifi_auto", "audio", "boot_from_cd")
 MONO_RGB_LOOKUP = tuple(

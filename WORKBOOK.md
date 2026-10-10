@@ -1,5 +1,49 @@
 # M5Tab-Macintosh workbook
 
+## Guest RAM up to 24 MB — 2026-10-10
+
+Austin asked for 20–24 MB of guest RAM so Mac OS 8 can run a web browser,
+based on 5.1. He also dropped the JIT for good. Work is on branch
+`claude/guest-ram-24mb` (`worktrees/guest-ram-24mb`, from v5.1 `6c8a7e9`).
+The paused JIT work was committed and kept only as the local tag
+`archive/rv32-jit`; its branch was deleted and its 945 MB of evidence moved
+to the macOS Trash.
+
+The 16 MB cap was only the list of choices. With 16 MB, 10.75 MB of PSRAM
+was still free after startup. The address map, the inline RAM fast path and
+translated RAM code do not assume 16 MB. Changes:
+
+- Memory choices are 8, 16, 20 and 24 MB, defined once in
+  `boot_control_values.h`. Saved 4/12 MB settings round up to 8/16.
+- If guest RAM would leave less than 5 MB of PSRAM, startup steps down 4 MB
+  at a time instead of failing. The boot log reports the largest free block.
+- `table68k` (1 MB) is freed once the dispatch table is built.
+- The compiled-out JIT sources and hooks are removed. Firmware section sizes
+  are identical.
+- `MEM` over serial reports PSRAM free, largest block and lowest since boot.
+- Fixed in passing (also in 5.1): a power-on Wi-Fi auto-connect was dropped
+  before the emulator started, so the guest never had a network unless
+  settings were changed over serial. It now waits up to 10 s.
+
+Hardware: second Tab5 (ST7121), USB-Debug profile, app SHA256
+`6447514f…2b349b52`, readback matched. At 24 MB: 3.44 MB PSRAM free after
+startup (largest block 3.2 MB), lowest 2.86 MB across Speedometer, Wi-Fi and
+browsing; Mac OS 8.1 reports 24 MB built-in, 18 MB largest unused block.
+Speedometer PR 1.01 (CPU 0.806, Graphics 1.036, Disk 1.03, Math 10.56;
+5.1 on this unit: 1.008). `PANEL VERIFY` 0/921,600 mismatches. Internet
+Explorer 3.01a loaded `http://system7today.com` over the lab Wi-Fi.
+
+Guest disk changes on that unit: Extensions Manager set `Speedy8 Net`
+(`Speedy8` plus TCP/IP and six Open Transport libraries) is active and
+TCP/IP is on; `Speedy8` itself is unchanged. With networking loaded the
+rating is PR 0.998. Wi-Fi is configured with auto-connect, RAM is 24 MB.
+The original app (5.1 USB-Debug, SHA256 `eda80f43…`) is backed up in the
+worktree's ignored `artifacts/guest-ram-24mb/hardware/backup/`.
+
+Not hardware-tested: Waveshare and Rev3 images (built only), finger touch on
+the new Memory row (host-rendered only). Next: review the PR and decide
+whether it ships as a 5.1.x release.
+
 ## v5.1 release — 2026-10-10
 
 Austin asked to combine the Shut Down fix with the preboot work and the other
@@ -7,8 +51,8 @@ work since 5.0.1, push it, merge it into master and release it as 5.1. He
 chose the translated code with ROM and system code only (not Speedometer's
 own code). He asked for testing, with any issues fixed, before release. He
 also chose to publish all four board images, with Waveshare and Rev3 noted as
-build-validated only. The paused JIT is not included: it remains uncommitted
-on `codex/rv32-jit` in the control checkout, with `JIT_WORKLOG.md` there.
+build-validated only. The paused JIT is not included. Austin later dropped
+it for good (see the guest RAM section above).
 
 Integration branch: `claude/release-v5.1`, in session worktree
 `.claude/worktrees/jolly-hertz-2b45fc`, based on v5.0.1 `94af0b8`:

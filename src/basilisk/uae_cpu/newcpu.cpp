@@ -48,10 +48,6 @@ extern int intlev(void);	// From baisilisk_glue.cpp
 #include "compiler/compemu.h"
 #include "fpu/fpu.h"
 
-#if USE_RV32_JIT
-#include "jit_compiler.h"
-#endif
-
 #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
 B2_mutex *spcflags_lock = NULL;
 #endif
@@ -677,6 +673,11 @@ void init_m68k (void)
 #if CPU_COMPACT_DISPATCH
 	// Only needed when the full 256KB table is in PSRAM.
 	build_compact_dispatch();
+#endif
+#if !COUNT_INSTRS
+	// The decode table is only needed to build cpufunctbl. Releasing its
+	// 1 MB of PSRAM leaves runtime headroom beside 24 MB of guest RAM.
+	free_table68k ();
 #endif
 
 #if defined(ENABLE_EXCLUSIVE_SPCFLAGS) && !defined(HAVE_HARDWARE_LOCKS)
@@ -2020,22 +2021,6 @@ void m68k_do_execute (void)
 		cpuop_func **const compact_handlers = compact_dispatch_handlers;
 #endif
 
-#if USE_RV32_JIT
-		// Execute already-translated blocks at the current PC before falling
-		// through to one interpreter instruction on a cache miss. The miss path
-		// also attempts compilation, so hot code promotes itself naturally.
-		while (batch_count > 0) {
-			int jit_n = jit_try_execute(m68k_getpc());
-			if (jit_n <= 0) break;
-			batch_count -= jit_n;
-			if (unlikely(CPU_INNER_SPECIAL_PENDING())) {
-				special_hit = true;
-				break;
-			}
-		}
-			if (!special_hit && batch_count > 0) {
-#endif
-
 #if CPU_AOT_PROFILE
 			// Profiling build: count every ROM and RAM instruction dispatched.
 			while (batch_count-- > 0) {
@@ -2237,9 +2222,6 @@ void m68k_do_execute (void)
 			}
 			}
 #endif // CPU_TRACE_CACHE
-#if USE_RV32_JIT
-		}
-#endif
 
 			// batch_count may be -1 when the scalar loop exits after final iteration.
 			// A translated region runs many instructions in one dispatch.
@@ -2399,6 +2381,11 @@ void m68k_disasm (uaecptr addr, uaecptr *nextpc, int cnt)
 		}
 		opcode = get_iword_1 (m68kpc_offset);
 		m68kpc_offset += 2;
+		if (table68k == NULL) {
+			// Released after startup: show the raw words only.
+			printf ("\n");
+			continue;
+		}
 		if (cpufunctbl[cft_map(opcode)] == op_illg_1) {
 			opcode = 0x4AFC;
 		}

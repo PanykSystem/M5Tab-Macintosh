@@ -835,6 +835,12 @@ void read_table68k (void)
     }
 }
 
+void free_table68k (void)
+{
+    free (table68k);
+    table68k = NULL;
+}
+
 static int mismatch;
 
 static void handle_merges (long int opcode)

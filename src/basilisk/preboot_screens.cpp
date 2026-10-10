@@ -10,6 +10,7 @@
  */
 
 #include "preboot_screens.h"
+#include "boot_control_values.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -157,8 +158,7 @@ static void paintList(const ListGeometry &list, int count, int first, int select
 
 /* ---- Settings ---------------------------------------------------------- */
 
-static const int kRamChoices[4] = {4, 8, 12, 16};
-static const char *const kRamLabels[4] = {"4 MB", "8 MB", "12 MB", "16 MB"};
+static_assert(kRamLast - kRamFirst + 1 == kBootRamChoiceCount, "one Memory radio per RAM choice");
 static const char *const kOptionLabels[3] = {"Sound", "Boot from CD", "Rotate 180"};
 
 SettingsLayout LayoutSettings(int width, int height, bool usb_available)
@@ -182,8 +182,8 @@ SettingsLayout LayoutSettings(int width, int height, bool usb_available)
 
     L.memory_box = {left, y, 290, 50};
     L.options_box = {left + 300, y, usable - 300, 50};
-    for (int i = 0; i < 4; ++i)
-        L.controls[kRam4 + i] = {left + 14 + i * 68 - 4, y + 14, 66, 28};
+    for (int i = 0; i < kBootRamChoiceCount; ++i)
+        L.controls[kRamFirst + i] = {left + 14 + i * 68 - 4, y + 14, 66, 28};
     int total = 0;
     for (const char *label : kOptionLabels) total += 18 + TextWidth(label);
     const int gap = (L.options_box.w - 28 - total) / 2;
@@ -227,10 +227,12 @@ void PaintSettings(const SettingsLayout &L, const SettingsView &v)
     }
 
     GroupBox(L.memory_box, "Memory");
-    for (int i = 0; i < 4; ++i) {
-        const Rect &hit = L.controls[kRam4 + i];
-        LabeledRadio(hit.x + 4, hit.y + 6, kRamLabels[i], v.ram_mb == kRamChoices[i],
-                     v.pressed == kRam4 + i);
+    for (int i = 0; i < kBootRamChoiceCount; ++i) {
+        const Rect &hit = L.controls[kRamFirst + i];
+        char label[8];
+        snprintf(label, sizeof(label), "%d MB", kBootRamChoicesMB[i]);
+        LabeledRadio(hit.x + 4, hit.y + 6, label, v.ram_mb == kBootRamChoicesMB[i],
+                     v.pressed == kRamFirst + i);
     }
     GroupBox(L.options_box, "Options");
     const bool option_values[3] = {v.sound, v.boot_from_cd, v.rotate180};
