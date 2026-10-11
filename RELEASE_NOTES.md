@@ -1,74 +1,73 @@
-# 5.2 - 24 MB and Web Browsing
+# 5.3 - Battery, Sleep and Brightness
 
-5.2 lets Mac OS 8 use up to 24 MB of RAM, enough to run a period web
-browser, and fixes Wi-Fi auto-connect so the Mac has a network after a
-normal power-on. Performance is unchanged from 5.1.
-
-On the development Tab5 with 24 MB, Mac OS 8.1 reports 24 MB of built-in
-memory with an 18 MB largest unused block, and Internet Explorer loads
-`http://system7today.com` over Wi-Fi. Speedometer 4.02 rates it the same as
-5.1 (Quadra 605 = 1.0):
-
-| Score | 5.1, 16 MB | 5.2, 24 MB |
-| --- | ---: | ---: |
-| CPU | 0.804 | 0.806 |
-| Graphics | 1.033 | 1.036 |
-| Disk | 1.03 | 1.03 |
-| Math | 10.64 | 10.56 |
-| **Performance Rating** | **1.009** | **1.01** |
+On the Tab5, Mac OS 8 now has a PowerBook-style Power Manager fed by the
+Tab5's battery monitor. The Control Strip's **Battery Monitor** shows the
+charge level, charging and time remaining; **Sleep** turns the display off
+until you touch it; **Power Settings** dims and turns off the display when
+idle; and a new **Brightness** Control Strip module sets the backlight from
+the Mac. The emulated machine is still a Quadra: the emulator answers the
+Power Manager calls itself, with no PMU emulation.
+[POWER_MANAGEMENT.md](POWER_MANAGEMENT.md) has the details.
 
 ## What changed
 
-- **20 and 24 MB of Mac RAM.** Startup Settings and serial control offer 8,
-  16, 20 and 24 MB. A saved 4 or 12 MB setting from older firmware rounds up
-  to 8 or 16 MB. The 16 MB limit was only the list of choices: the Tab5 still
-  had 10.75 MB of PSRAM free with 16 MB of Mac RAM. If guest RAM would leave
-  less than 5 MB of PSRAM for the emulator, startup uses the next smaller
-  size and logs a warning instead of failing. The emulator also frees its 1 MB
-  68k decode table after startup, so 24 MB leaves 3.4 MB of PSRAM free.
-- **Wi-Fi at power-on.** Wi-Fi auto-connect started in the background, but
-  the splash usually started the emulator first, and the connection was
-  dropped. The emulator only looks for a network at startup, so the Mac had
-  none unless settings had just been changed over serial. Startup now waits
-  up to 10 seconds for the connection; the Tab5 connects in about 6.
-- **Shut Down with a network.** Choosing Special > Shut Down while Mac OS had
-  a network crashed the Tab5: the emulator deleted its network task after
-  the task had already deleted itself. The bug dates from v3.0 but was rare,
-  because Wi-Fi seldom reached the emulator before the fix above. The 5.2
-  hardware gate found it.
-- **Diagnostics.** The serial `MEM` command reports free PSRAM, its largest
-  free block and the lowest free since boot. The boot log reports the largest
-  free block after startup.
-- **Cleanup.** The unused, compiled-out RV32 JIT code is removed. The
-  firmware it produced was unchanged.
+- **Battery Monitor.** Apple's Control Strip module, already in Mac OS 8.1,
+  appears on the Tab5 and shows the level, a charging indicator, time
+  remaining on battery and "battery removed". The Finder's menu bar clock
+  shows a battery gauge too. The Tab5 has no fuel gauge: the level is
+  estimated from the battery monitor's voltage and current, smoothed so the
+  gauge does not jump with load.
+- **Sleep.** Special > Sleep (new in the Finder's menu) and the Sleep Now
+  module turn the backlight off and pause the Mac until a touch, key or
+  mouse movement. The waking touch is not passed to the Mac. Wi-Fi stays up.
+- **Idle dimming.** Power Settings' Better Conservation and Better
+  Performance presets dim the display after the dimming timeout and turn it
+  off after the sleep timeout (1 and 2 minutes, or 5 and 15).
+- **Brightness module.** A new Control Strip module (download
+  `M5Tab-Macintosh-Mac-Extras-v5.3.zip`) sets the backlight to one of eight
+  levels or turns the display off, and remembers the level.
+- **Power services for Mac software.** Gestalt `'M5pw'` gives programs the
+  backlight, a battery record, display-off and a serial log, on every board.
+- **Settings and serial control.** `power_manager=no` in
+  `/basilisk_settings.txt`, or `boot-set power_manager false`, turns the
+  Power Manager off. `POWER` serial commands report battery and display
+  state and can simulate battery states for testing. `mac_control.py power`
+  wraps them.
+- **Host tools.** `mac_control.py boot-get` now works against firmware that
+  predates a setting.
 
-## Browsing from Mac OS 8
+The Waveshare board has no battery, so Mac OS sees no Power Manager there;
+the Brightness module still works.
 
-Join Wi-Fi in Startup Settings first. In Mac OS, TCP/IP must be on:
+## Installing the Brightness module
 
-1. If **TCP/IP** is missing from Control Panels, open **Extensions Manager**,
-   turn on TCP/IP and the Open Transport extensions (Open Transport Library,
-   OpenTransportLib, Open Tpt Internet Library, OpenTptInternetLib, Open Tpt
-   AppleTalk Library, OpenTptAppleTalkLib) and restart. A copy of your
-   current set keeps the original intact.
-2. In **TCP/IP**, set Connect via **Ethernet** and Configure **Using DHCP
-   Server**.
+Unzip `M5Tab-Macintosh-Mac-Extras-v5.3.zip`. Then either:
 
-Browsers of this era cannot negotiate modern HTTPS. Use plain-HTTP sites
-such as `http://system7today.com`. With Open Transport loaded and Wi-Fi
-connected, the Performance Rating was 0.991 to 0.999 over eight runs.
+- serve `Brightness.bin` from a computer on your network (for example
+  `python3 -m http.server` in that folder) and open
+  `http://<computer>:8000/Brightness.bin` in Internet Explorer 3.01 on the
+  Mac, which decodes it and saves **Brightness**; or
+- with the disk image on a computer and hfsutils installed,
+  `hcopy -m Brightness.bin ":System Folder:Control Strip Modules:Brightness"`;
+  or
+- copy the `M5Tab Extras` folder (with its hidden `.rsrc` and `.finf`
+  folders) into your SD card's shared folder.
+
+Drag **Brightness** onto the System Folder; the Finder puts it in Control
+Strip Modules. Restart. The Control Strip control panel must be on.
 
 ## Downloads
 
 | Hardware / use | Filename | Flash offset |
 | --- | --- | --- |
-| Tab5, pre-v3, standard SDK | `M5Tab-Macintosh-v5.2.bin` | `0x0` |
-| Tab5, v3.1+ | `M5Tab-Macintosh-Rev3-v5.2.bin` | `0x0` |
-| Waveshare 10.1, pre-v3 | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.2.bin` | `0x0` |
-| Waveshare 10.1, v3.1+ | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.2.bin` | `0x0` |
-| Tab5, pre-v3, tested USB debug SDK | `M5Tab-Macintosh-USB-Debug-v5.2.bin` | `0x0` |
-| Same debug application, existing compatible Tab5 installation | `M5Tab-Macintosh-USB-Debug-v5.2-app.bin` | `0x10000` |
-| Python CLI, MCP server, benchmark and startup-screen tour | `M5Tab-Macintosh-Host-Tools-v5.2.zip` | — |
+| Tab5, pre-v3, standard SDK | `M5Tab-Macintosh-v5.3.bin` | `0x0` |
+| Tab5, v3.1+ | `M5Tab-Macintosh-Rev3-v5.3.bin` | `0x0` |
+| Waveshare 10.1, pre-v3 | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.3.bin` | `0x0` |
+| Waveshare 10.1, v3.1+ | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.3.bin` | `0x0` |
+| Tab5, pre-v3, tested USB debug SDK | `M5Tab-Macintosh-USB-Debug-v5.3.bin` | `0x0` |
+| Same debug application, existing compatible Tab5 installation | `M5Tab-Macintosh-USB-Debug-v5.3-app.bin` | `0x10000` |
+| Brightness Control Strip module for the Mac | `M5Tab-Macintosh-Mac-Extras-v5.3.zip` | — |
+| Python CLI, MCP server, benchmark and startup-screen tour | `M5Tab-Macintosh-Host-Tools-v5.3.zip` | — |
 
 Chip revision is separate from panel or PCB revision. Rev3 images require
 ESP32-P4 revision **3.1 or newer**; revision 3.0 is not covered. Merged images
@@ -89,51 +88,63 @@ hardware.
 
 ## Verification
 
-- 58 host tests, including the new RAM choices, saved-setting migration and
-  the Settings screen's Memory row rendered on both boards.
+- 64 host tests, including the battery estimate (charger inference, time
+  estimates, simulation, backlight states), the committed Brightness module
+  package and `boot-get` against older firmware.
 - All five firmware profiles build. Each one's translated code passes
   `check_blob.py`. Every merged image is checked against its bootloader,
   partition table and application at the expected flash offsets.
-- The translation still matches the interpreter: the host differential test
-  ran 51,102 trials covering 186 million instructions with no mismatch, and
-  the on-device self-test on the Tab5 also passed.
-- Hardware checks on a pre-v3 ESP32-P4 revision 1.3 Tab5 with Mac OS 8.1 and
-  24 MB:
-  - About This Computer reports 24 MB built-in memory.
-  - Performance Ratings at 24 MB, with and without networking loaded, and
-    150 back-to-back color screenshots over serial with Wi-Fi connected.
-  - Full-screen pixel checks with 0 of 921,600 pixels wrong.
-  - Wi-Fi connected after a plain power-on, and Internet Explorer 3.01a
-    loaded `http://system7today.com`.
-  - The lowest free PSRAM across startup, Speedometer, Wi-Fi and browsing was
-    2.86 MB.
-  - Special > Shut Down with Wi-Fi connected, ending at the power-off screen,
-    followed by a clean start.
-  - The released debug application was flashed and read back with a matching
-    hash, printed the 5.2 banner and booted to the Finder with saved settings
-    intact.
+- The translation is unchanged from 5.1. On the Tab5 all 537 translated ROM
+  regions still install over the 5.3-patched ROM (each is checked against
+  the ROM bytes first). The on-device self-test was stopped early, by choice,
+  after 8,130 trials with no failures.
+- Hardware testing on a pre-v3 ESP32-P4 revision 1.3 Tab5 with Mac OS 8.1,
+  24 MB and Wi-Fi, before the release build:
+  - The Power Manager traps stay installed through startup, and Gestalt
+    reports the Power Manager and the power services.
+  - Battery Monitor showed the live battery (charging, then full on USB)
+    and simulated states: on battery with time remaining, charging, low and
+    pack removed. The menu bar clock showed the same.
+  - Sleep Now and Special > Sleep turned the display off; a mouse movement or
+    `POWER WAKE` woke it, and Open Transport kept working.
+  - Better Conservation dimmed the display after 60 s idle and turned it off
+    after 120 s.
+  - The Brightness module's menu, icon refresh, Turn Off Display and saved
+    level across restarts.
+  - Speedometer 4.02 with the Control Strip open over the test: PR 0.977 to
+    0.982 (CPU 0.80, Graphics 0.94 to 0.95, Math 10.3) over four runs; with the
+    strip collapsed, PR 1.091 (Graphics 1.41). 5.2 rated 1.000 to 1.002 in
+    the same session with its narrower strip.
+- The 5.3 USB-Debug application was flashed to that Tab5 and read back with a
+  matching hash. The release gate did not finish: during the reset that
+  followed, the Tab5 left USB and could not be checked remotely. The release
+  was published without the remaining gate steps.
 - `BUILD-MANIFEST.json` records exact source commits, component hashes, the
-  translation's hash and the hardware-tested application. `SHA256SUMS` covers
+  translation's hash and the hardware testing. `SHA256SUMS` covers
   downloadable assets.
 
 ## Limits and rollback
 
-Waveshare and production-silicon (Rev3) images share this code and build
-cleanly but were not run on hardware for this release. Waveshare's panel
-framebuffer is 0.2 MB larger than the Tab5's; 24 MB should still fit, and
-startup steps down if it does not. The new Memory row was tested with
-injected touches, not fingers. At 24 MB about 3.4 MB of PSRAM stays free for
-screenshots, networking and other runtime buffers.
+- Sleep keeps the ESP32-P4, Wi-Fi and the display controller powered; only
+  the backlight is off and the Mac is paused. Mac OS sleep procedures are
+  not called (one of them, the Display Manager's, crashed the firmware), so
+  software that wants to know about sleep is not told.
+- There are no low-battery warnings and no automatic shutdown on an empty
+  battery. Power Settings' timeouts last until the Mac restarts.
+- Not tested on battery power alone (the USB cable carried the serial
+  console in testing), with the battery pack removed, or with the
+  shared-folder install route. Waveshare and Rev3 images build cleanly but
+  were not run on hardware.
+- With the Power Manager on, the Special menu gains Sleep, so Restart and
+  Shut Down move down a row. Scripts that click fixed menu positions need
+  the new positions (see POWER_MANAGEMENT.md).
+- The Control Strip floats over the bottom of the screen. With Battery
+  Monitor, Sleep Now, Power Settings and Brightness in it, it is wider, and
+  Speedometer's Graphics score drops when its test area is covered; collapse
+  the strip to compare scores.
 
-During release testing the Tab5 reset once with Wi-Fi connected, while a
-color screenshot was being read over serial just after a Performance
-Rating. It came back in Startup Settings with the disk image unchanged. The
-cause was not found, and it did not recur in eight further ratings and 150
-screenshot transfers. Please report a reset with the serial log if you see
-one.
-
-The [v5.1 release](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1)
-remains available for rollback with a matching board/silicon image. A 5.1
-firmware reads a saved 20 or 24 MB setting as 8 MB. Preserve known-good
-firmware and SD backups. Firmware rollback does not revert settings or guest
-disk contents.
+The [v5.2 release](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.2)
+remains available for rollback with a matching board/silicon image. 5.2
+ignores the `power_manager` setting; the Brightness module declines to load
+on it. Preserve known-good firmware and SD backups. Firmware rollback does
+not revert settings or guest disk contents.

@@ -28,6 +28,8 @@ worktrees/
 *.bin
 *.hex
 *.map
+# ...except prebuilt guest software (MacBinary) that users install on the Mac
+!guest/**/dist/*.bin
 
 # Python host tooling
 __pycache__/

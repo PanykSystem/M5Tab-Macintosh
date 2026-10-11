@@ -33,6 +33,7 @@
 #include "prefs.h"
 #include "video.h"
 #include "adb.h"
+#include "power_manager.h"
 
 #ifdef POWERPC_ROM
 #include "thunks.h"
@@ -255,12 +256,17 @@ void ADBOp(uint8 op, uint8 *data)
 void ADBMouseMoved(int x, int y)
 {
 	B2_lock_mutex(mouse_lock);
+	bool moved;
 	if (relative_mouse) {
+		moved = x != 0 || y != 0;
 		mouse_x += x; mouse_y += y;
 	} else {
+		moved = x != mouse_x || y != mouse_y;
 		mouse_x = x; mouse_y = y;
 	}
 	B2_unlock_mutex(mouse_lock);
+	if (moved)
+		PowerManagerNoteActivity();
 	if (SetInterruptFlagIfNew(INTFLAG_ADB))
 		TriggerInterrupt();
 }
@@ -272,6 +278,8 @@ void ADBMouseMoved(int x, int y)
 
 void ADBMouseDown(int button)
 {
+	PowerManagerNoteActivity();
+
     // O2S: Add button to buffer
     button_buffer[button_write_ptr] = button;
     button_write_ptr = (button_write_ptr + 1) % BUTTON_BUFFER_SIZE;
@@ -317,6 +325,7 @@ void ADBSetRelMouseMode(bool relative)
 
 void ADBKeyDown(int code)
 {
+	PowerManagerNoteActivity();
 	B2_lock_mutex(key_lock);
 
 	// Check for buffer overflow before writing

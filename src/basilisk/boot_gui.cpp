@@ -309,6 +309,10 @@ static bool wifi_initialized = false;
 // Audio settings
 static bool audio_enabled = true;  // Default: audio enabled
 
+// Power Manager emulation (battery, sleep) on boards with a battery.
+// Settings file and serial only; there is no preboot checkbox.
+static bool power_manager_enabled = true;
+
 // "Boot from CD" - when set, LoadPrefs steers bootdrive to the CD-ROM
 // driver refnum so the Mac boots from the selected ISO instead of the
 // hard disk. Equivalent to holding "C" at startup on a real Mac.
@@ -437,6 +441,9 @@ static void loadSettings(void)
         } else if (key == "audio" || key == "audio_enabled") {
             audio_enabled = (value == "yes" || value == "true" || value == "1");
             Serial.printf("[BOOT_GUI] Loaded audio_enabled: %s\n", audio_enabled ? "yes" : "no");
+        } else if (key == "power_manager") {
+            power_manager_enabled = (value == "yes" || value == "true" || value == "1");
+            Serial.printf("[BOOT_GUI] Loaded power_manager: %s\n", power_manager_enabled ? "yes" : "no");
         } else if (key == "boot_from_cd") {
             boot_from_cd = (value == "yes" || value == "true" || value == "1");
             Serial.printf("[BOOT_GUI] Loaded boot_from_cd: %s\n", boot_from_cd ? "yes" : "no");
@@ -472,6 +479,7 @@ static bool saveSettings(void)
     text += "audio="; text += audio_enabled ? "yes\n" : "no\n";
     text += "boot_from_cd="; text += boot_from_cd ? "yes\n" : "no\n";
     text += "rotation="; text += rotation_degrees; text += '\n';
+    text += "power_manager="; text += power_manager_enabled ? "yes\n" : "no\n";
     const char *temp = "/basilisk_settings.tmp";
     const char *backup = "/basilisk_settings.bak";
     if (SD_FS.exists(temp) && !SD_FS.remove(temp)) return false;
@@ -1538,6 +1546,7 @@ static BootSetting control_settings[] = {
     {"audio", BoolSetting, &audio_enabled, 0},
     {"boot_from_cd", BoolSetting, &boot_from_cd, 0},
     {"rotation", RotationSetting, &rotation_degrees, 0},
+    {"power_manager", BoolSetting, &power_manager_enabled, 0},
 };
 
 static String controlHex(const char *value)
@@ -1710,6 +1719,7 @@ static String controlExecute(char *command)
         wifi_ssid[0] = wifi_password[0] = 0;
         selected_ram_mb = kBootRamDefaultMB; rotation_degrees = 180;
         skip_gui = wifi_auto_connect = boot_from_cd = false; audio_enabled = true;
+        power_manager_enabled = true;
         loadSettings(); controlSyncSelections();
         control_wifi_changed = true;
         return "OK BOOT RELOAD";
@@ -2086,6 +2096,11 @@ int BootGUI_GetRotation(void)
 bool BootGUI_GetAudioEnabled(void)
 {
     return audio_enabled;
+}
+
+bool BootGUI_GetPowerManagerEnabled(void)
+{
+    return power_manager_enabled;
 }
 
 bool BootGUI_IsWiFiConnected(void)

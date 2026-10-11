@@ -151,6 +151,12 @@ bool BootGUI_GetWiFiAutoConnect(void);
  */
 bool BootGUI_GetAudioEnabled(void);
 
+/**
+ * @brief Whether the Mac sees a Power Manager (battery, sleep) on boards
+ *        with a battery. Saved as power_manager=yes|no; default yes.
+ */
+bool BootGUI_GetPowerManagerEnabled(void);
+
 /*
  *  Returns true if the user asked to boot from the selected CD-ROM
  *  ("Boot from CD" checkbox). Only meaningful when GetCDROMPath() is

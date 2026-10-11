@@ -14,6 +14,7 @@
 #include "board.h"
 #include "board_config.h"
 #include "board_display.h"
+#include "board_power.h"
 #include "board_sd.h"          /* pulls in SD_FS (SD on Tab5, SD_MMC on Waveshare) */
 
 #include "boot_gui.h"
@@ -131,6 +132,8 @@ void setup(void)
         Serial.println("[MAIN] ERROR: BoardDisplay_Init failed - halting");
         while (true) { delay(1000); }
     }
+
+    BoardPower_Init();
 
     Serial.printf("[MAIN] Display: %dx%d\n", BoardDisplay_Width(), BoardDisplay_Height());
     Serial.printf("[MAIN] Free heap: %d bytes\n",     ESP.getFreeHeap());

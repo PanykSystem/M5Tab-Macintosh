@@ -201,6 +201,27 @@ class SerialTransportTests(unittest.TestCase):
         self.assertEqual(next(c._protocol_lines(time.monotonic() + 1)), "@B2 OK INFO 4 Tab5 640 360")
         self.assertEqual(c.serial.timeout, 0.25)
 
+    def test_boot_get_all_skips_settings_older_firmware_lacks(self):
+        replies = {name: f"@B2 OK BOOT VALUE {name} " + ("74727565" if name in mac_control.BOOT_BOOL_SETTINGS
+                   else "3234" if name == "ramsize" else "313830" if name == "rotation" else "-")
+                   for name in mac_control.BOOT_READ_SETTINGS}
+        replies["power_manager"] = "@B2 ERR BOOT unknown_setting"
+        c = self.control()
+
+        def fake_request(command, expected, timeout=5.0):
+            line = replies[command.split()[-1]]
+            if line.startswith("@B2 ERR"):
+                raise mac_control.ControlError(line[4:])
+            return line
+
+        c.request = fake_request
+        values = c.boot_get()
+        self.assertNotIn("power_manager", values)
+        self.assertEqual(values["ramsize"], 24)
+        replies["disk"] = "@B2 ERR BOOT unknown_setting"
+        with self.assertRaises(mac_control.ControlError):
+            c.boot_get()
+
     def test_tagged_request_ignores_delayed_ack_and_error(self):
         c = self.control([b"@B2 RES 00000001 OK MOUSE MOVE 1 1\n@B2 ERR stale\n",
                           b"@B2 RES 00000001 ERR stale\n@B2 RES 00000002 OK MOUSE MOVE 2 2\n"])

@@ -46,28 +46,27 @@ Both variants share the BasiliskII core, video pipeline, USB HID handling, and b
 
 ---
 
-## v5.2 — 24 MB and Web Browsing
+## v5.3 — Battery, Sleep and Brightness
 
-[Download v5.2](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.2).
-Mac OS 8 can now have up to 24 MB of RAM, enough to run a period web browser,
-and Wi-Fi set to auto-connect now reaches the Mac after a normal power-on.
+[Download v5.3](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.3).
+On the Tab5, Mac OS 8 now sees a PowerBook-style Power Manager fed by the
+Tab5's battery monitor.
 
-- **20 and 24 MB of Mac RAM:** Startup Settings offers 8, 16, 20 and 24 MB.
-  Older 4 and 12 MB settings round up to 8 and 16. If a board cannot fit the
-  chosen size, startup uses the next smaller one instead of failing.
-- **Wi-Fi at power-on:** auto-connect used to be dropped before the emulator
-  started, so the Mac had no network unless settings had been changed. Startup
-  now waits up to 10 seconds for the connection.
-- **Shut Down with a network:** shutting down while Mac OS had a network no
-  longer crashes the Tab5.
-- **Web browsing:** Internet Explorer on Mac OS 8.1 loads plain-HTTP sites
-  such as `http://system7today.com`. Mac OS needs TCP/IP and Open Transport
-  turned on; see [Networking Support](#networking-support).
-- **Performance unchanged:** Speedometer rates 5.2 at 24 MB the same as 5.1
-  (Performance Rating 1.01).
-- **Diagnostics:** the serial `MEM` command reports free PSRAM.
+- **Battery Monitor:** the Control Strip shows the charge level, charging
+  and time remaining, and the menu bar clock shows a battery gauge.
+- **Sleep:** Special > Sleep and the Sleep Now module turn the display off
+  until you touch the screen.
+- **Idle dimming:** Power Settings' presets dim the display, then turn it
+  off, when the Mac is idle.
+- **Brightness:** a new Control Strip module in
+  `M5Tab-Macintosh-Mac-Extras-v5.3.zip` sets the backlight from the Mac.
+- **For developers:** Gestalt `'M5pw'` power services for Mac software,
+  `POWER` serial commands with simulated battery states, and a guide to
+  adding battery support to another board in
+  [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md).
 
-See the [release notes](RELEASE_NOTES.md) for verification and limits.
+See the [release notes](RELEASE_NOTES.md) for installation, verification
+and limits.
 
 ### Choose the image for your chip revision
 
@@ -76,12 +75,12 @@ Check the serial boot log or run `esptool --port PORT chip-id`.
 
 | Board / ESP32-P4 silicon | Download filename | PlatformIO environment |
 |---|---|---|
-| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.2.bin` | `esp32p4_pioarduino` |
-| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.2.bin` | `esp32p4_pioarduino_rev3` |
-| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.2.bin` | `waveshare_p4_101` |
-| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.2.bin` | `waveshare_p4_101_rev3` |
+| Tab5, pre-v3 engineering sample | `M5Tab-Macintosh-v5.3.bin` | `esp32p4_pioarduino` |
+| Tab5, v3.1 or newer | `M5Tab-Macintosh-Rev3-v5.3.bin` | `esp32p4_pioarduino_rev3` |
+| Waveshare 10.1, pre-v3 engineering sample | `M5Tab-Macintosh-Waveshare-P4-10.1-v5.3.bin` | `waveshare_p4_101` |
+| Waveshare 10.1, v3.1 or newer | `M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.3.bin` | `waveshare_p4_101_rev3` |
 
-The separate `M5Tab-Macintosh-USB-Debug-v5.2.bin` download is the tested
+The separate `M5Tab-Macintosh-USB-Debug-v5.3.bin` download is the tested
 **pre-v3 Tab5** configuration using Arduino 3.3.8 / IDF 5.5.4. It is useful for
 serial testing and for the SD-mount issue observed with the older standard Tab5
 SDK on the development unit. The standard profiles remain unchanged because
@@ -119,12 +118,19 @@ Elecrow CrowPanel Advanced 9-inch support (#10) is still under investigation.
 Its panel, audio, SD wiring and 1024×600 scaling need a separate board port;
 these downloads do not target it. See [the issue review](ISSUE_FIXES.md).
 
+## Previous release: v5.2
+
+[v5.2 — 24 MB and Web Browsing](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.2)
+lets Mac OS 8 use up to 24 MB of RAM, keeps the power-on Wi-Fi connection
+for the Mac, so Internet Explorer can load plain-HTTP sites, and fixes Shut
+Down with a network. All of it remains in v5.3.
+
 ## Previous release: v5.1
 
 [v5.1 — Translated Code and Startup Settings](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1)
 runs the Mac's most-used ROM and system code as translated native code
 (Performance Rating 0.765 to 1.009), redesigns Startup Settings in the Mac OS 8
-style and makes Special > Shut Down work. All of it remains in v5.2; see the
+style and makes Special > Shut Down work. All of it remains in v5.3; see the
 [performance design guide](EMULATOR_PERFORMANCE.md) and the
 [performance report](PERFORMANCE_REPORT.md).
 
@@ -134,7 +140,7 @@ style and makes Special > Shut Down work. All of it remains in v5.2; see the
 made the interpreter and display pipeline faster (Performance Rating 0.458 to
 0.765): inline guest RAM access, native trap dispatch, cheaper condition
 codes, hot handlers in internal RAM, 32-pixel dirty spans and a packed tile
-writer. It also fixed the frozen Mac clock. All of it remains in v5.2.
+writer. It also fixed the frozen Mac clock. All of it remains in v5.3.
 
 ## Previous release: v5.0
 
@@ -142,7 +148,7 @@ writer. It also fixed the frozen Mac clock. All of it remains in v5.2.
 fixed dotted Finder borders by disabling native QuickDraw acceleration, unified
 display publication and dirty tracking across both boards, lowered the Tab5 SD
 clock to 10 MHz after startup CRC failures, and fixed rotation, overlay,
-lifecycle and input issues. All of it remains in v5.2; see the
+lifecycle and input issues. All of it remains in v5.3; see the
 [display review](DISPLAY_RELIABILITY_REVIEW.md),
 [QuickDraw comparison](QUICKDRAW_REGRESSION.md) and
 [SD startup record](SD_STABILITY.md).
@@ -151,7 +157,7 @@ lifecycle and input issues. All of it remains in v5.2; see the
 
 [v4.7.1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v4.7.1)
 added faster CRC-checked serial screenshots, replay-safe input, and complete
-preboot settings control. Those features remain available in v5.2; see
+preboot settings control. Those features remain available in v5.3; see
 [AUTOMATION.md](AUTOMATION.md) for commands and protocol details.
 
 ## Previous release: v4.7
@@ -350,7 +356,7 @@ Q950) or `0x0276` (Classic) will boot. The default file path is
 
 ## Overview
 
-This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.2 at **1.01 Macintosh Quadra 605s** overall (CPU 0.80, Graphics 1.03, Math 10.6). The emulation includes:
+This project runs a **Motorola 68040** emulator that can boot real Macintosh ROMs and run genuine classic Mac OS software. Speedometer 4.02 rates v5.3 at **0.98 Macintosh Quadra 605s** overall with the Control Strip open over the test (CPU 0.80, Graphics 0.95, Math 10.3), and 1.09 with the strip collapsed (Graphics 1.41). The emulation includes:
 
 - **CPU**: Motorola 68040 interpreter with FPU (68881), native trap dispatch and hot handlers in internal RAM
 - **RAM**: 8, 16, 20 or 24 MB (allocated from ESP32-P4's 32MB PSRAM); 20–24 MB leaves room for a web browser under Mac OS 8
@@ -561,6 +567,19 @@ This port includes the following BasiliskII subsystems, adapted for ESP32:
 | **Audio** | `audio_esp32.cpp` | Sound output via ES8388 codec |
 | **Networking** | `ether_esp32.cpp`, `net_router.cpp` | WiFi NAT router (TCP/UDP/ICMP/DHCP) |
 | **Input** | `input_esp32.cpp` | Touch + USB HID handling |
+| **Power Manager** | `power_manager.cpp`, `board/board_power.cpp` | Battery, sleep and backlight for Mac OS |
+
+### Battery, sleep and brightness
+
+On the Tab5, Mac OS sees a PowerBook-style Power Manager fed by the Tab5's
+battery monitor. The Control Strip's **Battery Monitor** shows the charge
+level, charging state and time remaining; **Sleep Now** turns the display
+off until you touch it; and **Power Settings** can dim and turn off the
+display when idle. A small **Brightness** Control Strip module (in
+[`guest/control-strip-brightness`](guest/control-strip-brightness)) sets
+the backlight from the Mac. See [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)
+for installation, how it works, and how to add battery support to another
+board.
 
 ### Supported ROMs
 
@@ -658,7 +677,7 @@ esptool.py --chip esp32p4 \
     --port /dev/ttyACM0 \
     --baud 921600 \
     write_flash \
-    0x0 M5Tab-Macintosh-v5.2.bin
+    0x0 M5Tab-Macintosh-v5.3.bin
 ```
 
 **Note**: Replace `/dev/ttyACM0` with your actual port:
@@ -706,30 +725,30 @@ platform requires it). For an isolated build environment:
 python3.13 -m venv .build/release-tools
 .build/release-tools/bin/python -m pip install platformio==6.2.0 esptool==5.4.0
 PATH="$PWD/.build/release-tools/bin:$PATH" PIO="$PWD/.build/release-tools/bin/pio" \
-  ./scripts/build_release.sh v5.2
+  ./scripts/build_release.sh v5.3
 ```
 
 For an existing supported toolchain, use the release script:
 
 ```bash
 # Create all four versioned firmware images
-./scripts/build_release.sh v5.2
+./scripts/build_release.sh v5.3
 
 # Or build only production-silicon Waveshare firmware
-./scripts/build_release.sh v5.2 waveshare-rev3
+./scripts/build_release.sh v5.3 waveshare-rev3
 
 # Output:
-#   release/M5Tab-Macintosh-v5.2.bin
-#   release/M5Tab-Macintosh-Rev3-v5.2.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.2.bin
-#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.2.bin
+#   release/M5Tab-Macintosh-v5.3.bin
+#   release/M5Tab-Macintosh-Rev3-v5.3.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-v5.3.bin
+#   release/M5Tab-Macintosh-Waveshare-P4-10.1-Rev3-v5.3.bin
 ```
 
 The release binary can be flashed with a single esptool command:
 
 ```bash
 esptool --chip esp32p4 --port /dev/cu.usbmodem* \
-    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.2.bin
+    --baud 230400 write-flash 0x0 release/M5Tab-Macintosh-v5.3.bin
 ```
 
 ---

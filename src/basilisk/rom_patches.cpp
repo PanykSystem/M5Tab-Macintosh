@@ -38,6 +38,7 @@
 #endif
 
 #include "rom_patches.h"
+#include "power_manager.h"
 
 #define DEBUG 0
 #include "debug.h"
@@ -1638,6 +1639,10 @@ static bool patch_rom_32(void)
 	*wp++ = htons(M68K_JMP);
 	*wp++ = htons(base >> 16);
 	*wp = htons(base & 0xffff);
+
+	// Power Manager trap stubs and Gestalt 'powr' (activated by EMUL_OP_INSTALL_DRIVERS).
+	// The original .Sony driver is far larger than 0xe40 bytes, so this area is free.
+	PowerManagerPatchROM(sony_offset + 0xe00);
 
 	// Look for double PACK 4 resources
 	if ((base = find_rom_resource(FOURCC('P','A','C','K'), 4)) == 0) return false;
