@@ -36,6 +36,8 @@ BOOT_BOOL_SETTINGS = {"skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_m
 BOOT_INT_SETTINGS = {"ramsize": (8, 16, 20, 24), "rotation": (0, 180)}
 BOOT_READ_SETTINGS = tuple(k for k in BOOT_STRING_SETTINGS if k != "wifi_pass") + ("ramsize", "rotation", "skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_manager", "wifi_password_set")
 BOOT_WRITE_SETTINGS = tuple(BOOT_STRING_SETTINGS) + tuple(BOOT_INT_SETTINGS) + ("skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_manager")
+# Settings that older firmware does not have; boot_get() leaves them out there.
+BOOT_OPTIONAL_SETTINGS = {"power_manager"}
 MONO_RGB_LOOKUP = tuple(
     b"".join(
         b"\xff\xff\xff" if value & (0x80 >> bit) else b"\x00\x00\x00"
@@ -453,7 +455,15 @@ class MacControl:
     def boot_get(self, key: str | None = None) -> Any:
         """Read current selections. Wi-Fi passwords are write-only."""
         if key is None:
-            return {name: self.boot_get(name) for name in BOOT_READ_SETTINGS}
+            values = {}
+            for name in BOOT_READ_SETTINGS:
+                try:
+                    values[name] = self.boot_get(name)
+                except ControlError as exc:
+                    if name in BOOT_OPTIONAL_SETTINGS and "unknown_setting" in str(exc):
+                        continue    # firmware older than this setting
+                    raise
+            return values
         if key not in BOOT_READ_SETTINGS:
             raise ControlError(f"unknown or write-only boot setting: {key}")
         prefix = f"@B2 OK BOOT VALUE {key} "
