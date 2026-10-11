@@ -161,6 +161,8 @@ python3 tools/mac_control.py boot-start
 
 `boot-get [KEY]` reads the current selections, including during emulation;
 `wifi_password_set` reports password presence without exposing its value.
+Without a key it leaves out settings that older firmware does not have
+(`power_manager` before 5.3).
 `boot-set` requires the main settings screen, updates the touch UI, and changes
 the selections in memory. `boot-save` persists them; `boot-start` validates the
 media, saves, and starts the emulator. It returns when emulator initialization

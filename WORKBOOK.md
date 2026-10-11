@@ -1,12 +1,33 @@
 # M5Tab-Macintosh workbook
 
+## v5.3 release — 2026-10-11
+
+Austin asked to release the battery, sleep and backlight work as **5.3**.
+Branch `claude/battery-power` (`worktrees/battery-power`) was rebased onto
+the 5.2 merge (`0f73b21`); it adds the feature commits, the version, release
+notes, README and this section, and a fix so `mac_control.py boot-get` works
+against firmware without `power_manager`. The translation is unchanged
+(`sys-22`, SHA256 `7fb5dfee…`). Release scripts and evidence are in the
+control checkout's ignored `artifacts/release-v5.3/`; the gate adds the
+power checks and the shifted Special-menu positions.
+
+Checks: 64 host tests; all five profiles build and pass `check_blob.py`;
+537/537 regions install over the patched ROM. Austin asked to skip the
+device self-test (stopped after 8,130 trials, 0 failures). The gate flashed
+the USB-Debug app (SHA256 `60c4c3cf…`) and read it back, but in the reset
+that followed the Tab5 left USB and did not return; Austin asked to merge and
+publish without the remaining gate steps. Hardware evidence is the
+pre-release testing below (same power code on that Tab5). The Tab5 needs a
+physical check: it was last seen running the 5.3 debug app, not 5.2.
+Publication details are in `artifacts/release-v5.3/release-status.json`.
+
 ## Battery, sleep and backlight for Mac OS — 2026-10-10
 
 Austin asked whether Mac OS 8 could see the Tab5 battery (Control Strip
 Battery Monitor), then to build it with documentation for future battery
 and sleep work, and to make the backlight controllable from the Mac. Work
 is on branch `claude/battery-power` (`worktrees/battery-power`, from
-`2b72477`), uncommitted. [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)
+`2b72477`, rebased onto 5.2 for release). [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)
 describes the design, the guest-visible interface and how to add a board.
 
 - **Board layer** (`src/board/board_power.*`, one hooks file per board):
@@ -55,9 +76,9 @@ file (empty resource fork after repeated hard resets) is in the Trash, and
 ignored `artifacts/battery-power/` (test drivers, logs, screenshots).
 
 Not tested: battery-only operation (needs the USB cable out), a removed
-pack, the shared-folder install route, Waveshare (built only). Next: review,
-then decide whether it ships; with the Power Manager on, Special-menu
-automation coordinates shift by one row.
+pack, the shared-folder install route, Waveshare (built only). With the
+Power Manager on, Special-menu automation coordinates shift by one row.
+Released in 5.3 (section above).
 
 ## v5.2 release — 2026-10-10
 
