@@ -31,6 +31,11 @@ memory with an 18 MB largest unused block, and Internet Explorer loads
   dropped. The emulator only looks for a network at startup, so the Mac had
   none unless settings had just been changed over serial. Startup now waits
   up to 10 seconds for the connection; the Tab5 connects in about 6.
+- **Shut Down with a network.** Choosing Special > Shut Down while Mac OS had
+  a network crashed the Tab5: the emulator deleted its network task after
+  the task had already deleted itself. The bug dates from v3.0 but was rare,
+  because Wi-Fi seldom reached the emulator before the fix above. The 5.2
+  hardware gate found it.
 - **Diagnostics.** The serial `MEM` command reports free PSRAM, its largest
   free block and the lowest free since boot. The boot log reports the largest
   free block after startup.
@@ -51,7 +56,7 @@ Join Wi-Fi in Startup Settings first. In Mac OS, TCP/IP must be on:
 
 Browsers of this era cannot negotiate modern HTTPS. Use plain-HTTP sites
 such as `http://system7today.com`. With Open Transport loaded and Wi-Fi
-connected, the Performance Rating was 0.998.
+connected, the Performance Rating was 0.991 to 0.999 over eight runs.
 
 ## Downloads
 
@@ -95,12 +100,15 @@ hardware.
 - Hardware checks on a pre-v3 ESP32-P4 revision 1.3 Tab5 with Mac OS 8.1 and
   24 MB:
   - About This Computer reports 24 MB built-in memory.
-  - Performance Ratings at 24 MB, with and without networking loaded.
+  - Performance Ratings at 24 MB, with and without networking loaded, and
+    150 back-to-back color screenshots over serial with Wi-Fi connected.
   - Full-screen pixel checks with 0 of 921,600 pixels wrong.
   - Wi-Fi connected after a plain power-on, and Internet Explorer 3.01a
     loaded `http://system7today.com`.
   - The lowest free PSRAM across startup, Speedometer, Wi-Fi and browsing was
     2.86 MB.
+  - Special > Shut Down with Wi-Fi connected, ending at the power-off screen,
+    followed by a clean start.
   - The released debug application was flashed and read back with a matching
     hash, printed the 5.2 banner and booted to the Finder with saved settings
     intact.
@@ -116,6 +124,13 @@ framebuffer is 0.2 MB larger than the Tab5's; 24 MB should still fit, and
 startup steps down if it does not. The new Memory row was tested with
 injected touches, not fingers. At 24 MB about 3.4 MB of PSRAM stays free for
 screenshots, networking and other runtime buffers.
+
+During release testing the Tab5 reset once with Wi-Fi connected, while a
+color screenshot was being read over serial just after a Performance
+Rating. It came back in Startup Settings with the disk image unchanged. The
+cause was not found, and it did not recur in eight further ratings and 150
+screenshot transfers. Please report a reset with the serial log if you see
+one.
 
 The [v5.1 release](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.1)
 remains available for rollback with a matching board/silicon image. A 5.1

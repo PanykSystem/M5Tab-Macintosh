@@ -58,6 +58,8 @@ and Wi-Fi set to auto-connect now reaches the Mac after a normal power-on.
 - **Wi-Fi at power-on:** auto-connect used to be dropped before the emulator
   started, so the Mac had no network unless settings had been changed. Startup
   now waits up to 10 seconds for the connection.
+- **Shut Down with a network:** shutting down while Mac OS had a network no
+  longer crashes the Tab5.
 - **Web browsing:** Internet Explorer on Mac OS 8.1 loads plain-HTTP sites
   such as `http://system7today.com`. Mac OS needs TCP/IP and Open Transport
   turned on; see [Networking Support](#networking-support).

@@ -10,8 +10,20 @@ this section. The translation is unchanged from 5.1 (`sys-22`, SHA256
 checkout's ignored `artifacts/release-v5.2/`.
 
 Pre-release checks: host AOT differential PASS (51,102 trials, 0 failures);
-on-device self-test, five-profile build with `check_blob.py`, and the Tab5
-hardware gate are recorded in `artifacts/release-v5.2/release-status.json`.
+on-device self-test PASS (26,866 trials, 0 failures, 38 min). The first
+hardware gate panicked on Special > Shut Down: `ether_exit()` deleted the
+network receive task after it had deleted itself. The bug dates from v3.0;
+5.2's power-on Wi-Fi fix made networking live at Shut Down. Commit
+`Stop the network task once on Shut Down` on the release branch fixes it.
+Gate attempt 2 (fixed app `7400c294…`) completed a rating (PR 0.997), then
+the Tab5 reset while a color screenshot was being read over serial and came
+back in Startup Settings. Nothing else opened the port (confirmed by the
+battery-power session, which was building concurrently and had swapped the
+shared RISC-V toolchain mid-build once). Not reproduced in four logged
+ratings, gate attempt 3 or 150 color screenshots with Wi-Fi live; noted in
+the release limits. Gate attempt 3 passed: PR 0.991 with networking loaded,
+PANEL VERIFY 0/921,600, Shut Down with Wi-Fi to the power-off screen, clean
+restart. Final records: `artifacts/release-v5.2/release-status.json`.
 
 ## Guest RAM up to 24 MB — 2026-10-10
 
