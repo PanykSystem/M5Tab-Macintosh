@@ -561,6 +561,19 @@ This port includes the following BasiliskII subsystems, adapted for ESP32:
 | **Audio** | `audio_esp32.cpp` | Sound output via ES8388 codec |
 | **Networking** | `ether_esp32.cpp`, `net_router.cpp` | WiFi NAT router (TCP/UDP/ICMP/DHCP) |
 | **Input** | `input_esp32.cpp` | Touch + USB HID handling |
+| **Power Manager** | `power_manager.cpp`, `board/board_power.cpp` | Battery, sleep and backlight for Mac OS |
+
+### Battery, sleep and brightness
+
+On the Tab5, Mac OS sees a PowerBook-style Power Manager fed by the Tab5's
+battery monitor. The Control Strip's **Battery Monitor** shows the charge
+level, charging state and time remaining; **Sleep Now** turns the display
+off until you touch it; and **Power Settings** can dim and turn off the
+display when idle. A small **Brightness** Control Strip module (in
+[`guest/control-strip-brightness`](guest/control-strip-brightness)) sets
+the backlight from the Mac. See [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)
+for installation, how it works, and how to add battery support to another
+board.
 
 ### Supported ROMs
 

@@ -1,5 +1,64 @@
 # M5Tab-Macintosh workbook
 
+## Battery, sleep and backlight for Mac OS — 2026-10-10
+
+Austin asked whether Mac OS 8 could see the Tab5 battery (Control Strip
+Battery Monitor), then to build it with documentation for future battery
+and sleep work, and to make the backlight controllable from the Mac. Work
+is on branch `claude/battery-power` (`worktrees/battery-power`, from
+`2b72477`), uncommitted. [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)
+describes the design, the guest-visible interface and how to add a board.
+
+- **Board layer** (`src/board/board_power.*`, one hooks file per board):
+  battery level from the INA226 voltage with IR compensation and an
+  open-circuit curve, smoothing and monotonic display, charger state and
+  time estimates, backlight with dim and off states. Waveshare: no
+  battery, backlight only.
+- **Guest layer** (`src/basilisk/power_manager.cpp`): high-level emulation
+  with the machine still a Quadra. ROM Gestalt `'powr'` and Mac OS 8.1's
+  Gestalt (`ptch` 5, patched as it loads) report $1F; `$A09E`, `$A09F`,
+  `$A085` (and its `IdleUpdate`/`IdleState`/`SerialPower` variants) and
+  `$A08A` go to EMUL_OP stubs; sleep turns the backlight off and parks the
+  CPU until touched; Power Settings' timeouts dim and blank the display.
+- **Power services**, Gestalt `'M5pw'`, on every board: backlight, battery
+  record, display off, log. Re-registered on INIT loads because `ptch` 5
+  rebuilds the Gestalt table.
+- **Brightness Control Strip module** (`guest/control-strip-brightness`,
+  Retro68), prebuilt in `dist/`.
+- `power_manager` setting (settings file, `boot-set`), `POWER` serial
+  commands and `mac_control.py power`.
+
+Found on hardware and fixed: Mac OS 8.1 replaced `'powr'` without the
+dispatch bit; the rebuilt Gestalt table dropped `'M5pw'`; the INA226 reports
+charging current as negative and CHG_STAT stays "charging" with the charger
+off; the Display Manager's sleep procedure crashed the firmware, so sleep
+no longer calls sleep-queue procedures.
+
+Verification on the second Tab5 (USB-Debug image, 24 MB, Mac OS 8.1 with
+networking): Battery Monitor and the menu bar clock show level, charging,
+time remaining and pack removed (live and `POWER SIM`); Sleep Now and
+Finder Special > Sleep sleep and wake by mouse; idle dim at 60 s and off at
+120 s with Better Conservation; Brightness menu, icon refresh, Turn Off
+Display and saved level across restarts; Open Transport worked after a
+sleep; all four trap entries still point at the stubs at the Finder;
+537/537 translated regions; no crash markers. Speedometer Graphics follows
+the Control Strip's width (stock 3 modules 1.016, 9 modules 0.945,
+collapsed 1.406); CPU, Disk and Math are unchanged and the Power Manager
+itself makes only a few hundred calls per rating. 63 host tests pass; all
+five profiles build and pass `check_blob.py`.
+
+Device state: the 5.2 USB-Debug app (`7400c294…`) was restored and boots
+with its settings. Guest disk: the Brightness module is in Control Strip
+Modules (it declines to load on 5.2), the damaged Control Strip Preferences
+file (empty resource fork after repeated hard resets) is in the Trash, and
+`basilisk_settings.txt` has `power_manager=yes`. Evidence: the worktree's
+ignored `artifacts/battery-power/` (test drivers, logs, screenshots).
+
+Not tested: battery-only operation (needs the USB cable out), a removed
+pack, the shared-folder install route, Waveshare (built only). Next: review,
+then decide whether it ships; with the Power Manager on, Special-menu
+automation coordinates shift by one row.
+
 ## v5.2 release — 2026-10-10
 
 Austin approved the guest RAM work, asked to merge it (PR #24, merge commit

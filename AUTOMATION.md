@@ -152,6 +152,7 @@ python3 tools/mac_control.py boot-start
 | `extfs` | Existing SD directory path; `""` disables sharing |
 | `ramsize` | `8`, `16`, `20`, or `24` MiB |
 | `audio`, `boot_from_cd` | `true` or `false` |
+| `power_manager` | `true` or `false`: the Mac's Power Manager on boards with a battery ([POWER_MANAGEMENT.md](POWER_MANAGEMENT.md)) |
 | `rotation` | `0` or `180` degrees; hardware support as in the touch UI |
 | `wifi_ssid` | UTF-8 string, at most 32 bytes |
 | `wifi_pass` | Write-only string, at most 63 bytes; `""` clears it |
@@ -426,6 +427,17 @@ Diagnostic commands (all read-only for the guest):
 | `AOTPROF START` / `AOTPROF STOP` | Profiling build only: clear and start, or stop, the per-instruction execution counters |
 | `AOTPROF MAP n`, `AOTPROF READ chunk` | ROM counters: which chunks of 64 hold a count, and one chunk |
 | `AOTPROF RAMMAP n`, `AOTPROF RAMCHUNKS page`, `AOTPROF RAMREAD page chunk` | The same for code that ran in guest RAM, by 4 KB page |
+
+Power commands ([POWER_MANAGEMENT.md](POWER_MANAGEMENT.md#serial-commands)
+describes the fields). These change what the Mac sees:
+
+| Command | Reply |
+|---|---|
+| `POWER` | Battery, backlight, display and guest Power Manager state on one line |
+| `POWER SIM percent charging connected present` / `POWER SIM OFF` | Report fixed battery values (`-1` keeps a field live) / return to live readings |
+| `POWER BACKLIGHT n` | Set the backlight percent (5-100) |
+| `POWER WAKE` | End a sleep or idle blank, as a touch would |
+| `POWER CHARGE 0` / `POWER CHARGE 1` | Turn the charger off / on (test aid; on again at power-on) |
 
 `tools/aot/aot_profile.py` drives the `AOTPROF` commands; see
 [tools/aot/README.md](tools/aot/README.md). Diagnostic output from other
