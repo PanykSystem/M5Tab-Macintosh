@@ -32,10 +32,10 @@ SCREENSHOT_BATCH_SIZE = 4
 SCREENSHOT_READ_SIZE = 768
 MAX_PROTOCOL_LINE = 4096
 BOOT_STRING_SETTINGS = {"disk": 255, "cdrom": 255, "extfs": 255, "wifi_ssid": 32, "wifi_pass": 63}
-BOOT_BOOL_SETTINGS = {"skip_gui", "wifi_auto", "audio", "boot_from_cd", "wifi_password_set"}
+BOOT_BOOL_SETTINGS = {"skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_manager", "wifi_password_set"}
 BOOT_INT_SETTINGS = {"ramsize": (8, 16, 20, 24), "rotation": (0, 180)}
-BOOT_READ_SETTINGS = tuple(k for k in BOOT_STRING_SETTINGS if k != "wifi_pass") + ("ramsize", "rotation", "skip_gui", "wifi_auto", "audio", "boot_from_cd", "wifi_password_set")
-BOOT_WRITE_SETTINGS = tuple(BOOT_STRING_SETTINGS) + tuple(BOOT_INT_SETTINGS) + ("skip_gui", "wifi_auto", "audio", "boot_from_cd")
+BOOT_READ_SETTINGS = tuple(k for k in BOOT_STRING_SETTINGS if k != "wifi_pass") + ("ramsize", "rotation", "skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_manager", "wifi_password_set")
+BOOT_WRITE_SETTINGS = tuple(BOOT_STRING_SETTINGS) + tuple(BOOT_INT_SETTINGS) + ("skip_gui", "wifi_auto", "audio", "boot_from_cd", "power_manager")
 MONO_RGB_LOOKUP = tuple(
     b"".join(
         b"\xff\xff\xff" if value & (0x80 >> bit) else b"\x00\x00\x00"
@@ -407,6 +407,32 @@ class MacControl:
 
     def info(self) -> str:
         return self.request("INFO", "OK INFO")
+
+    def power(self, action: str = "status", values: list[int] | None = None) -> dict[str, Any]:
+        """Battery, backlight and sleep state; see POWER_MANAGEMENT.md."""
+        values = values or []
+        if action == "sim":
+            if not 1 <= len(values) <= 4:
+                raise ControlError("power sim takes 1-4 values: percent charging connected present")
+            self.request("POWER SIM " + " ".join(str(v) for v in values), "OK POWER SIM")
+        elif action == "sim-off":
+            self.request("POWER SIM OFF", "OK POWER SIM")
+        elif action == "backlight":
+            if len(values) != 1:
+                raise ControlError("power backlight takes one percent value")
+            self.request(f"POWER BACKLIGHT {values[0]}", "OK POWER BACKLIGHT")
+        elif action == "wake":
+            self.request("POWER WAKE", "OK POWER WAKE")
+        elif action != "status":
+            raise ControlError(f"unknown power action: {action}")
+        for _ in range(3):
+            line = self.request("POWER", "OK POWER")
+            fields = dict(part.split("=", 1) for part in line.split() if "=" in part)
+            if "pm" in fields:
+                break
+        else:
+            raise ControlError("invalid POWER response")
+        return {key: int(value) if value.lstrip("-").isdigit() else value for key, value in fields.items()}
 
     def _boot_request(self, command: str, expected: str) -> str:
         return self.request(f"BOOT {command}", f"OK BOOT {expected}", timeout=15.0)
@@ -1331,6 +1357,10 @@ def build_parser() -> argparse.ArgumentParser:
     hit = subparsers.add_parser("boot-hit", help="locate a named control on the current preboot screen")
     hit.add_argument("name")
     subparsers.add_parser("panel-verify", help="check the panel against the frame it should show")
+    power = subparsers.add_parser("power", help="battery, backlight and sleep state (POWER_MANAGEMENT.md)")
+    power.add_argument("action", nargs="?", default="status",
+                       choices=("status", "sim", "sim-off", "backlight", "wake"))
+    power.add_argument("values", nargs="*", type=int)
     move = subparsers.add_parser("move")
     move.add_argument("x", type=int)
     move.add_argument("y", type=int)
@@ -1387,6 +1417,8 @@ def main(argv: list[str] | None = None) -> int:
                 control.touch(args.action, args.x, args.y, args.hold)
             elif args.command == "panel-verify":
                 print(json.dumps(control.panel_verify(), indent=2))
+            elif args.command == "power":
+                print(json.dumps(control.power(args.action, args.values), indent=2))
             elif args.command == "move":
                 control.move(args.x, args.y)
             elif args.command == "move-relative":

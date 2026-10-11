@@ -24,6 +24,8 @@
 #include "board_keyboard.h"
 #include "board_touch.h"
 #include "board_display.h"
+#include "board_power.h"
+#include "power_manager.h"
 #include "touch_overlay.h"
 
 #if defined(BOARD_M5STACK_TAB5)
@@ -1241,6 +1243,18 @@ static void processTouchInput(void)
 
     BoardTouchMulti multi;
     BoardTouch_GetMulti(&multi);
+
+    // A touch while the display is off wakes it. The Mac never sees that
+    // touch: it is held back until every finger has lifted.
+    static bool swallow_touch = false;
+    if (multi.count > 0) {
+        if (!swallow_touch && PowerManagerSleeping()) swallow_touch = true;
+        PowerManagerNoteActivity();
+    } else if (swallow_touch) {
+        swallow_touch = false;
+        return;
+    }
+    if (swallow_touch) return;
     TouchOverlay_Update(&multi);
 }
 
@@ -1286,6 +1300,8 @@ static void inputTask(void *param)
     
     while (input_task_running) {
         Board_Update();
+        BoardPower_Poll();
+        PowerManagerIdlePoll();
         
         processTouchInput();
         pollTab5Keyboard();

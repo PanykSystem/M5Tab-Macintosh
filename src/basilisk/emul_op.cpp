@@ -42,6 +42,7 @@
 #include "ether.h"
 #include "extfs.h"
 #include "emul_op.h"
+#include "power_manager.h"
 
 #ifdef ENABLE_MON
 #include "mon.h"
@@ -266,10 +267,13 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			r->a[6] = RAMBaseMac + RAMSize;
 			break;
 
-		case M68K_EMUL_OP_FIX_BOOTSTACK:	// Set boot stack to 3/4 of RAM (7.5)
-			r->a[1] = RAMBaseMac + RAMSize * 3 / 4;
-			D(bug("Fix boot stack %08x\n", r->a[1]));
+		case M68K_EMUL_OP_FIX_BOOTSTACK: {	// Set boot stack to 3/4 of RAM (7.5)
+			const uint32 boot_stack = RAMBaseMac + RAMSize * 3 / 4;
+			D(bug("Fix boot stack %08x\n", boot_stack));
+			PowerManagerBootHook("boot 3");		// Gestalt is up; extensions are not loaded yet
+			r->a[1] = boot_stack;
 			break;
+		}
 
 		case M68K_EMUL_OP_FIX_MEMSIZE: {	// Set correct logical and physical memory size
 			D(bug("Fix MemSize\n"));
@@ -318,6 +322,10 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 				r.a[0] = GetScrapPatch;
 				Execute68kTrap(0xa647, &r);	// SetToolTrap()
 			}
+
+			// Power Manager traps and the emulator power services
+			if (ROMVersion == ROM_VERSION_32)
+				PowerManagerInstall();
 
 			// Setup fake ASC registers
 			if (ROMVersion == ROM_VERSION_32) {
@@ -652,6 +660,7 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			uint8 *p = Mac2HostAddr(adr);
 			uint32 size = ReadMacInt32(adr - 8) & 0xffffff;
 			CheckLoad(type, id, p, size);
+			PowerManagerCheckLoad(type, id, p, size);
 			break;
 		}
 
@@ -728,6 +737,15 @@ void EmulOp(uint16 opcode, M68kRegisters *r)
 			if (ReadMacInt32(0x14c) == 0)
 				idle_wait();
 			r->a[0] = ReadMacInt32(0x2b6);
+			break;
+
+		case M68K_EMUL_OP_POWER_GESTALT:	// Power Manager emulation
+		case M68K_EMUL_OP_POWER_DISPATCH:
+		case M68K_EMUL_OP_POWER_PRIVATE:
+		case M68K_EMUL_OP_PMGR_OP:
+		case M68K_EMUL_OP_SLEEP:
+		case M68K_EMUL_OP_POWER_SERVICES:
+			PowerManagerEmulOp(opcode, r);
 			break;
 
 		case M68K_EMUL_OP_SUSPEND: {

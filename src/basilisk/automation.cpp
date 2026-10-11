@@ -27,6 +27,8 @@
 #include "boot_gui.h"
 #include "input.h"
 #include "board_display.h"
+#include "board_power.h"
+#include "power_manager.h"
 #include "preboot_ui.h"
 #include "quickdraw_accel.h"
 #include "perf_sampler.h"
@@ -891,6 +893,51 @@ static void processLegacyCommand(char *command)
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
                       (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM),
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        return;
+    }
+    if (strcmp(command, "POWER") == 0 || strcmp(command, "POWER STATUS") == 0) {
+        char state[512];
+        PowerManagerDescribe(state, sizeof(state));
+        protocolReply("@B2 OK POWER %s\n", state);
+        return;
+    }
+    if (strncmp(command, "POWER SIM", 9) == 0) {
+        // POWER SIM OFF | POWER SIM percent charging connected present (-1 = live)
+        int percent = -1, charging = -1, connected = -1, present = -1;
+        if (strcmp(command + 9, " OFF") == 0) {
+            BoardPower_Simulate(false, -1, -1, -1, -1);
+        } else if (sscanf(command + 9, "%d %d %d %d", &percent, &charging, &connected, &present) >= 1) {
+            BoardPower_Simulate(true, percent, charging, connected, present);
+        } else {
+            protocolReply("@B2 ERR POWER usage\n");
+            return;
+        }
+        protocolReply("@B2 OK POWER SIM\n");
+        return;
+    }
+    int backlight = 0;
+    if (sscanf(command, "POWER BACKLIGHT %d", &backlight) == 1) {
+        if (!BoardPower_HasBacklight()) {
+            protocolReply("@B2 ERR POWER no_backlight\n");
+            return;
+        }
+        BoardPower_SetBacklight(backlight);
+        protocolReply("@B2 OK POWER BACKLIGHT %d\n", BoardPower_GetBacklight());
+        return;
+    }
+    int charge = 0;
+    if (sscanf(command, "POWER CHARGE %d", &charge) == 1) {
+        // Test aid: the charger stays off until POWER CHARGE 1 or power-on.
+        if (!BoardPower_SetChargingEnabled(charge != 0)) {
+            protocolReply("@B2 ERR POWER no_charger_control\n");
+            return;
+        }
+        protocolReply("@B2 OK POWER CHARGE %d\n", charge != 0 ? 1 : 0);
+        return;
+    }
+    if (strcmp(command, "POWER WAKE") == 0) {
+        PowerManagerWake();
+        protocolReply("@B2 OK POWER WAKE\n");
         return;
     }
     if (strcmp(command, "NET") == 0) {

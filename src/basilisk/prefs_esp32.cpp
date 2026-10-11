@@ -18,6 +18,7 @@
 
 // Platform-specific preferences items
 prefs_desc platform_prefs_items[] = {
+    {"powermgr", TYPE_BOOLEAN, false, "emulate a Power Manager on boards with a battery"},
     {NULL, TYPE_END, false, NULL}  // End marker
 };
 
@@ -70,6 +71,11 @@ void LoadPrefs(const char *vmdir)
     PrefsReplaceBool("nosound", !audio_enabled);
     Serial.printf("[PREFS] Audio: %s\n", audio_enabled ? "enabled" : "disabled");
     
+    // Power Manager emulation (battery, sleep) on boards with a battery
+    const bool power_manager = BootGUI_GetPowerManagerEnabled();
+    PrefsReplaceBool("powermgr", power_manager);
+    Serial.printf("[PREFS] Power Manager: %s\n", power_manager ? "enabled" : "disabled");
+
     // Get CD-ROM path from Boot GUI selection
     const char* cdrom_path = BootGUI_GetCDROMPath();
     if (cdrom_path && strlen(cdrom_path) > 0) {
