@@ -1,5 +1,30 @@
 # M5Tab-Macintosh workbook
 
+## v5.2 release — 2026-10-10
+
+Austin approved the guest RAM work, asked to merge it (PR #24, merge commit
+`2b72477`) and to release it as **5.2**. Release branch `claude/release-v5.2`
+(`worktrees/release-v5.2`) adds only the version, release notes, README and
+this section. The translation is unchanged from 5.1 (`sys-22`, SHA256
+`7fb5dfee…`). Evidence, gate and packaging scripts are in the control
+checkout's ignored `artifacts/release-v5.2/`.
+
+Pre-release checks: host AOT differential PASS (51,102 trials, 0 failures);
+on-device self-test PASS (26,866 trials, 0 failures, 38 min). The first
+hardware gate panicked on Special > Shut Down: `ether_exit()` deleted the
+network receive task after it had deleted itself. The bug dates from v3.0;
+5.2's power-on Wi-Fi fix made networking live at Shut Down. Commit
+`Stop the network task once on Shut Down` on the release branch fixes it.
+Gate attempt 2 (fixed app `7400c294…`) completed a rating (PR 0.997), then
+the Tab5 reset while a color screenshot was being read over serial and came
+back in Startup Settings. Nothing else opened the port (confirmed by the
+battery-power session, which was building concurrently and had swapped the
+shared RISC-V toolchain mid-build once). Not reproduced in four logged
+ratings, gate attempt 3 or 150 color screenshots with Wi-Fi live; noted in
+the release limits. Gate attempt 3 passed: PR 0.991 with networking loaded,
+PANEL VERIFY 0/921,600, Shut Down with Wi-Fi to the power-off screen, clean
+restart. Final records: `artifacts/release-v5.2/release-status.json`.
+
 ## Guest RAM up to 24 MB — 2026-10-10
 
 Austin asked for 20–24 MB of guest RAM so Mac OS 8 can run a web browser,
