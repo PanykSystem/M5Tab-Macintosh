@@ -59,6 +59,7 @@ static std::map<uint16, uint32> protocol_handlers;
 // Network receive task
 static TaskHandle_t net_rx_task_handle = nullptr;
 static volatile bool net_rx_task_running = false;
+static SemaphoreHandle_t net_rx_task_stopped = nullptr;  // given as the task exits
 
 // Mutex for thread safety
 static SemaphoreHandle_t net_mutex = nullptr;
@@ -127,8 +128,9 @@ bool ether_init(void)
                   ether_addr[3], ether_addr[4], ether_addr[5]);
     
     // Start network receive task on Core 0
+    net_rx_task_stopped = xSemaphoreCreateBinary();
     net_rx_task_running = true;
-    BaseType_t result = xTaskCreatePinnedToCore(
+    BaseType_t result = net_rx_task_stopped == nullptr ? pdFAIL : xTaskCreatePinnedToCore(
         net_rx_task,
         "net_rx",
         4096,           // Stack size
@@ -140,6 +142,10 @@ bool ether_init(void)
     
     if (result != pdPASS) {
         Serial.println("[ETHER] Failed to create network RX task");
+        if (net_rx_task_stopped != nullptr) {
+            vSemaphoreDelete(net_rx_task_stopped);
+            net_rx_task_stopped = nullptr;
+        }
         router_exit();
         vSemaphoreDelete(net_mutex);
         net_mutex = nullptr;
@@ -161,9 +167,17 @@ void ether_exit(void)
     // Stop receive task
     if (net_rx_task_handle != nullptr) {
         net_rx_task_running = false;
-        vTaskDelay(pdMS_TO_TICKS(100));  // Give task time to exit
-        vTaskDelete(net_rx_task_handle);
+        // The task deletes itself. Deleting its handle here as well freed it
+        // twice and panicked on Shut Down whenever Wi-Fi was connected. Wait
+        // for its signal (its longest sleep is 500 ms) before tearing down
+        // the router it polls.
+        if (xSemaphoreTake(net_rx_task_stopped, pdMS_TO_TICKS(2000)) != pdTRUE) {
+            Serial.println("[ETHER] ERROR: RX task did not stop; router left running");
+            return;
+        }
         net_rx_task_handle = nullptr;
+        vSemaphoreDelete(net_rx_task_stopped);
+        net_rx_task_stopped = nullptr;
     }
     
     // Shutdown router
@@ -482,5 +496,6 @@ static void net_rx_task(void *param)
     }
     
     Serial.println("[ETHER] Network RX task stopped");
+    xSemaphoreGive(net_rx_task_stopped);
     vTaskDelete(nullptr);
 }
