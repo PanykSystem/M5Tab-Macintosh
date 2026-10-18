@@ -6,8 +6,8 @@
  *  The preboot UI draws on a logical canvas at half the panel resolution
  *  (640x360 on the Tab5, 640x400 on the Waveshare), the same size as the
  *  emulated Mac screen. Each logical pixel is an 8-bit palette index; Present()
- *  pushes the changed area through the emulator's own 2x indexed tile path, so
- *  every logical pixel is exactly a 2x2 block on the panel.
+ *  pushes the changed area through the emulator's board-scaled indexed tile path, so
+ *  every logical pixel uses the same scale as the Mac framebuffer.
  *
  *  Widget geometry and colors were measured from Mac OS 8.1 running in this
  *  emulator. Text uses Charcoal 12 (assets/fonts/charcoal12.bdf).
@@ -19,6 +19,8 @@
 
 #include <stddef.h>
 #include <stdint.h>
+
+#include "board_config.h"
 
 namespace PrebootUI {
 
@@ -44,7 +46,7 @@ enum Color : uint8_t {
     kFirstDynamic
 };
 
-constexpr int kScale = 2;          /* panel pixels per logical pixel, each axis */
+constexpr int kScale = BOARD_PIXEL_SCALE;  /* panel pixels per logical pixel, each axis */
 constexpr int kMenuBarHeight = 20;
 constexpr int kTitleBarHeight = 20;  /* window frame top row to content top line */
 constexpr int kLineHeight = 16;      /* Charcoal 12 line spacing */

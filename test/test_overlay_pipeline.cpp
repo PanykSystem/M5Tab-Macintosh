@@ -1,6 +1,7 @@
-#include <array>
 #include <algorithm>
 #include <cstring>
+#include <vector>
+#include "board_config.h"
 #define OVERLAY_HOST_TEST
 #include "../src/basilisk/touch_overlay.cpp"
 
@@ -16,7 +17,8 @@ extern "C" void VideoMarkTilesDirtyRect(int, int, int w, int h)
 
 int main()
 {
-    TouchOverlay_Init(1280, 720, 640, 360);
+    TouchOverlay_Init(BOARD_DISPLAY_WIDTH, BOARD_DISPLAY_HEIGHT,
+                      BOARD_MAC_SCREEN_WIDTH, BOARD_MAC_SCREEN_HEIGHT);
     assert(!TouchOverlay_IsVisible());
     expected_mode = TOUCH_OVERLAY_KEYBOARD;
     {
@@ -45,12 +47,15 @@ int main()
     TouchOverlay_BeginFrame();
     assert(s_frame.keys[0].held);
     // Guard the compositing buffer while exercising every panel tile.
-    std::array<uint16_t, 80 * 80 + 2> tile;
-    for (int y = 0; y < 720; y += 80) for (int x = 0; x < 1280; x += 80) {
-        tile.fill(0x1234); tile.front() = 0xdead; tile.back() = 0xbeef;
-        TouchOverlay_CompositeTile(x, y, 80, 80, tile.data() + 1);
-        assert(tile.front() == 0xdead && tile.back() == 0xbeef);
-    }
+    constexpr int tw = BOARD_TILE_WIDTH * BOARD_PIXEL_SCALE;
+    constexpr int th = BOARD_TILE_HEIGHT * BOARD_PIXEL_SCALE;
+    std::vector<uint16_t> tile(tw * th + 2);
+    for (int y = 0; y < BOARD_DISPLAY_HEIGHT; y += th)
+        for (int x = 0; x < BOARD_DISPLAY_WIDTH; x += tw) {
+            std::fill(tile.begin(), tile.end(), 0x1234); tile.front() = 0xdead; tile.back() = 0xbeef;
+            TouchOverlay_CompositeTile(x, y, tw, th, tile.data() + 1);
+            assert(tile.front() == 0xdead && tile.back() == 0xbeef);
+        }
     expected_mode = TOUCH_OVERLAY_NONE;
     TouchOverlay_Shutdown();
     assert(!TouchOverlay_IsVisible());
