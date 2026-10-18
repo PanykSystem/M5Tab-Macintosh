@@ -1,5 +1,5 @@
 // Render every preboot screen through the production panel path and check
-// that the panel holds the canvas pixel-doubled in both rotations. With
+// that the panel holds the canvas scaled in both rotations. With
 // PREBOOT_UI_OUT set, each screen is also written there as a binary PPM.
 #include <cassert>
 #include <cstdio>
@@ -19,25 +19,29 @@ namespace UI = PrebootUI;
 
 static std::vector<uint16_t> panel;
 
-static void expectDoubled(const char *name)
+static void expectScaled(const char *name)
 {
     std::vector<uint8_t> pixels(UI::Width() * UI::Height());
     uint16_t palette[256], w = 0, h = 0;
     assert(UI::CaptureFrame(pixels.data(), pixels.size(), palette, &w, &h));
-    assert(w == BoardDisplay_Width() / 2 && h == BoardDisplay_Height() / 2);
+    assert(w == BoardDisplay_Width() / UI::kScale && h == BoardDisplay_Height() / UI::kScale);
     auto &gfx = BoardDisplay_Gfx();
     for (int y = 0; y < h; ++y)
         for (int x = 0; x < w; ++x) {
             const uint16_t want = palette[pixels[y * w + x]];
-            for (int dy = 0; dy < 2; ++dy)
-                for (int dx = 0; dx < 2; ++dx)
+            for (int dy = 0; dy < UI::kScale; ++dy)
+                for (int dx = 0; dx < UI::kScale; ++dx)
                     if (readPanelPixel(panel.data(), gfx.panelW(), gfx.panelH(), gfx.flip180(),
-                                       2 * x + dx, 2 * y + dy) != want) {
+                                       UI::kScale * x + dx, UI::kScale * y + dy) != want) {
                         std::fprintf(stderr, "%s: panel (%d,%d) is not logical (%d,%d)\n",
-                                     name, 2 * x + dx, 2 * y + dy, x, y);
+                                     name, UI::kScale * x + dx, UI::kScale * y + dy, x, y);
                         std::abort();
                     }
         }
+    uint32_t checked, mismatched;
+    int first_x, first_y;
+    assert(UI::VerifyPanel(&checked, &mismatched, &first_x, &first_y));
+    assert(checked == panel.size() && mismatched == 0);
     if (const char *dir = std::getenv("PREBOOT_UI_OUT")) {
         std::string path = std::string(dir) + "/" + name + ".ppm";
         FILE *f = std::fopen(path.c_str(), "wb");
@@ -73,7 +77,7 @@ int main()
         const char *suffix = flip ? "" : "-unflipped";
         auto shot = [&](const char *name) {
             UI::Present();
-            expectDoubled((std::string(name) + suffix).c_str());
+            expectScaled((std::string(name) + suffix).c_str());
         };
 
         PaintSplash();
@@ -173,6 +177,29 @@ int main()
                          false, true};
         PaintAlert(LayoutAlert(W, H, off), off);
         shot("power-off");
+    }
+
+    // A single changed pixel exercises odd dirty bounds and the last panel pixel.
+    for (bool flip : {false, true}) {
+        BoardDisplay_Gfx().setFlip180(flip);
+        UI::Fill(0, 0, W, H, UI::kBlack);
+        UI::InvalidateAll();
+        UI::Present();
+        UI::Pixel(W - 1, H - 1, UI::kRed);
+        UI::Present();
+        expectScaled("last-pixel");
+        UI::Pixel(3, 5, UI::kBlue);
+        cache_result = -1;
+        UI::Present();
+        std::vector<uint8_t> shown(W * H);
+        uint16_t palette[256], width, height;
+        assert(UI::CaptureFrame(shown.data(), shown.size(), palette, &width, &height));
+        assert(shown[5 * W + 3] == UI::kBlack);
+        cache_result = ESP_OK;
+        UI::Present();
+        expectScaled("single-pixel-retry");
+        assert(UI::CaptureFrame(shown.data(), shown.size(), palette, &width, &height));
+        assert(shown[5 * W + 3] == UI::kBlue && shown[W * H - 1] == UI::kRed);
     }
 
     // Long names are shortened rather than overflowing.

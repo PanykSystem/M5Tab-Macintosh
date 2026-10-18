@@ -698,7 +698,8 @@ static void renderTileFromSnapshot(uint8 *snapshot, uint16 *local_palette, uint1
     for (int row = 0; row < TILE_HEIGHT; row++) {
         // Output row pointers (the second row is the 2x duplicate)
         uint16 *dst_row0 = out;
-        uint16 *dst_row1 = out + tile_pixel_width;
+        // At 1x keep even the unused pointer inside the output array.
+        uint16 *dst_row1 = out + (rows - 1) * tile_pixel_width;
 
         // Process 4 pixels at a time for better memory bandwidth
         int x = 0;

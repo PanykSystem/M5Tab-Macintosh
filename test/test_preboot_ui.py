@@ -1,4 +1,4 @@
-"""Render the preboot screens natively and check panel pixel doubling.
+"""Render the preboot screens natively and check panel scaling.
 
 Set PREBOOT_UI_PNG_DIR to also keep a PNG of every screen for review.
 """
@@ -49,6 +49,9 @@ class PrebootUITests(unittest.TestCase):
                     out.mkdir(parents=True, exist_ok=True)
                     ppm_to_png(ppm, out / (ppm.stem + ".png"))
             return sorted(p.stem for p in Path(folder).glob("*.ppm"))
+
+    def test_scale1_screens(self):
+        self.assertIn("settings", self.render("BOARD_HOST_SCALE1"))
 
     def test_tab5_screens(self):
         names = self.render("BOARD_M5STACK_TAB5")

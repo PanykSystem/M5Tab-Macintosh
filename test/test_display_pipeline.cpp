@@ -141,6 +141,30 @@ static void test_indexed_1x()
     }
 }
 
+// An indexed tile must fit inside each declared source row. Otherwise the
+// last row reads beyond an exactly sized framebuffer (ASan regression).
+static void test_indexed_source_bounds()
+{
+    uint16_t panel[32 * 32];
+    std::fill(std::begin(panel), std::end(panel), 0xbeef);
+    const uint8_t source[1] = {0xA5};
+    uint32_t pairs[256] = {};
+    for (int bits : {1, 2, 4, 8}) for (bool flip : {false, true}) {
+        const int width = 8 / bits;
+        assert(!writePanelIndexedTile1x(panel, 32, 32, flip, 0, 0, width + 1, 1,
+                                       source, 1, bits, 0, pairs));
+        assert(!writePanelIndexedTile1x(panel, 32, 32, flip, 0, 0, 1, 1,
+                                       source, 1, bits, width, pairs));
+        assert(!writePanelIndexedTile2x(panel, 32, 32, flip, 0, 0, 2 * (width + 1), 2,
+                                       source, 1, bits, 0, pairs));
+        assert(!writePanelIndexedTile2x(panel, 32, 32, flip, 0, 0, 2, 2,
+                                       source, 1, bits, width, pairs));
+        assert(!writePanelIndexedTile1x(panel, 32, 32, flip, 0, 0, 1, 1,
+                                       source, 0, bits, 0, pairs));
+        assert(std::all_of(std::begin(panel), std::end(panel), [](uint16_t p) { return p == 0xbeef; }));
+    }
+}
+
 // renderTileFromSnapshot must fill exactly the scale-sized buffer that
 // renderAndPushDirtyTiles allocates; a 2x-hardwired expansion would overflow
 // it at PIXEL_SCALE 1 (caught by ASan) and underfill it at 2x.
@@ -208,6 +232,14 @@ static void test_pipeline()
         renderPendingFrame(local_palette);
         assert_panel(panel, guest, depth, flip);
         assert(collect() == 0);
+        // An overlay forces the full snapshot/render/push path at every depth.
+        test_overlay_covered = true;
+        test_overlay_composites = 0;
+        force_full_update = true;
+        renderPendingFrame(local_palette);
+        assert(test_overlay_composites == TOTAL_TILES);
+        assert_panel(panel, guest, depth, flip);
+        test_overlay_covered = false;
         // A long partial write crosses many tiles and several tile rows.
         std::fill(guest.begin() + 39, guest.begin() + 16000, 0);
         VideoMarkDirtyRange(39, 16000 - 39);
@@ -294,7 +326,7 @@ static void test_lifecycle()
 int main()
 {
     test_ranges(); test_rotation(); test_indexed_rotation(); test_indexed_1x();
-    test_render_snapshot(); test_pipeline(); test_lifecycle();
+    test_indexed_source_bounds(); test_render_snapshot(); test_pipeline(); test_lifecycle();
     puts("PASS: randomized damage, panel rotation, 2x/1x indexed tiles, scaled renderer, "
          "production tile/palette pipeline, retries, splash and lifecycle");
 }

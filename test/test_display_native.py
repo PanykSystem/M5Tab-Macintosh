@@ -40,6 +40,14 @@ class DisplayNativeTests(unittest.TestCase):
         subprocess.run(["python3", str(ROOT / "scripts/build_assets.py")], check=True)
         self.compile_run("test/test_overlay_pipeline.cpp", "BOARD_M5STACK_TAB5")
 
+    def test_scale1_overlay_publication(self):
+        subprocess.run(["python3", str(ROOT / "scripts/build_assets.py")], check=True)
+        self.compile_run("test/test_overlay_pipeline.cpp", "BOARD_HOST_SCALE1")
+
+    def test_waveshare_overlay_publication(self):
+        subprocess.run(["python3", str(ROOT / "scripts/build_assets.py")], check=True)
+        self.compile_run("test/test_overlay_pipeline.cpp", "BOARD_WAVESHARE_P4_101")
+
     def test_quickdraw_fallback_guards(self):
         self.compile_run("test/test_quickdraw_guards.cpp", "BOARD_M5STACK_TAB5")
 

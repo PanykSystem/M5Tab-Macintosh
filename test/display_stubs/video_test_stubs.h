@@ -38,8 +38,10 @@ inline int MacFrameLayout;
 #define FLAYOUT_DIRECT 0
 inline bool AutomationSerialCaptureActive() { return false; }
 inline void TouchOverlay_BeginFrame() {}
-inline void TouchOverlay_CompositeTile(int,int,int,int,uint16 *) {}
-inline bool TouchOverlay_TileCovered(int,int,int,int) { return false; }
+inline bool test_overlay_covered = false;
+inline int test_overlay_composites = 0;
+inline void TouchOverlay_CompositeTile(int,int,int,int,uint16 *) { ++test_overlay_composites; }
+inline bool TouchOverlay_TileCovered(int,int,int,int) { return test_overlay_covered; }
 struct esp_task_wdt_config_t { int timeout_ms; int idle_core_mask; bool trigger_panic; };
 inline void esp_task_wdt_reconfigure(esp_task_wdt_config_t *) {}
 void VideoSignalFrameReady();
