@@ -1,5 +1,38 @@
 # M5Tab-Macintosh workbook
 
+## PR #29 and v5.4 beta 1 — 2026-10-18
+
+Review/release work is in `worktrees/scaling-review-release`, branch
+`codex/scaling-review-release`, based on Raf's `acbf65a`. The control
+checkout's existing workbook edit was preserved. User authorized the review,
+fixes, integration and a new release. No USB-connected display was available;
+the release is a prerelease and v5.3 remains stable.
+
+The initial GitHub review reproduced an ASan source-buffer overread for a
+1× indexed tile exceeding its row stride. Commit `faf43e0`, pushed to Raf's
+PR branch, validates both 1× and 2× source ranges with widened arithmetic,
+keeps source/output pointer advancement within arrays and adds missing 1×
+preboot and overlay/fallback coverage. Packed decoding and destination
+rotation match the reference renderer; existing 2× configurations and
+platform pins are retained.
+
+Validation: 68 host tests, including ASan/UBSan display and preboot tests at
+all three geometries; full fallback rendering at every indexed depth and
+rotation; odd single-pixel and last-pixel preboot updates; failed publication
+retry. All five firmware profiles build and pass their translated-code blob checks.
+Tab5 data/BSS section sizes match v5.3. The local generated ROM/system translation is identical
+to v5.3 (`7fb5dfee…95e3dc`); no CPU or guest changes were made.
+
+Evidence and release packaging: `artifacts/review-pr29/` in this worktree.
+The manifest records exact commits, SDK/component hashes, checks and the
+absence of hardware validation. No device was flashed. Roll back with the
+matching v5.3 board/silicon image; preserve settings and SD backups.
+
+Next: Tab5 startup/Finder/depth/rotation/overlay/panel regression before
+stable promotion. Olimex (#27), other proposed boards and color mapping
+(#28) remain separate open investigations; this scaling release does not
+claim to fix or validate them.
+
 ## v5.3 release — 2026-10-11
 
 Austin asked to release the battery, sleep and backlight work as **5.3**.

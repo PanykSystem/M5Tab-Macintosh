@@ -46,6 +46,19 @@ Both variants share the BasiliskII core, video pipeline, USB HID handling, and b
 
 ---
 
+## v5.4 beta 1 — Display scaling prerelease
+
+[Download v5.4 beta 1](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.4-beta.1).
+The shared display code supports 1× indexed rendering and board-scaled preboot
+screens, with expanded host regression checks. Existing hardware still uses
+2× scaling and its existing SDK pins. This adds no Olimex firmware and does
+not resolve issue #28's separate color report.
+
+This prerelease is software/build validated only; physical display regression
+is still required. [v5.3](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.3)
+remains the stable release. See [release notes](RELEASE_NOTES.md) for the beta
+assets, validation, limits and rollback.
+
 ## v5.3 — Battery, Sleep and Brightness
 
 [Download v5.3](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.3).
@@ -65,8 +78,8 @@ Tab5's battery monitor.
   adding battery support to another board in
   [POWER_MANAGEMENT.md](POWER_MANAGEMENT.md).
 
-See the [release notes](RELEASE_NOTES.md) for installation, verification
-and limits.
+See the [v5.3 release notes](https://github.com/amcchord/M5Tab-Macintosh/releases/tag/v5.3)
+for installation, verification and limits.
 
 ### Choose the image for your chip revision
 
